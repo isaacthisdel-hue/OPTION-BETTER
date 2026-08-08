@@ -1,0 +1,234 @@
+:root {
+  /* Palette: deep slate terminal, not pure black. Signal colours are muted
+     and specific — cyan for "confirmed/positive structure", amber for "watch",
+     coral for penalties/risk. No default acid green. */
+  --bg: #0c1017;
+  --panel: #131923;
+  --panel-2: #1a2130;
+  --line: #232c3b;
+  --ink: #e6ecf5;
+  --ink-dim: #8595ad;
+  --ink-faint: #55637a;
+  --cyan: #38d6c4;
+  --amber: #e5a84b;
+  --coral: #e5695f;
+  --violet: #8b7cf0;
+  --pos: #38d6c4;
+  --neg: #e5695f;
+
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+a { color: inherit; text-decoration: none; }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--ink-dim); }
+.faint { color: var(--ink-faint); }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+
+/* ---------- shell ---------- */
+.shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 20px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.brand {
+  padding: 0 20px 20px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.brand .mark {
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+  color: var(--cyan);
+}
+.brand .sub {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  border-left: 2px solid transparent;
+}
+.nav a:hover { color: var(--ink); background: var(--panel-2); }
+.nav a.active {
+  color: var(--ink);
+  border-left-color: var(--cyan);
+  background: var(--panel-2);
+}
+.nav .idx { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); width: 16px; }
+
+.main { padding: 24px 28px 60px; max-width: 1180px; }
+
+.pagehead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.pagehead h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.pagehead .eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+.pagesub { color: var(--ink-dim); font-size: 13px; margin: 8px 0 22px; max-width: 60ch; }
+
+/* ---------- disclaimer ribbon ---------- */
+.ribbon {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: linear-gradient(90deg, rgba(229,168,75,0.10), transparent);
+  border: 1px solid rgba(229,168,75,0.28);
+  border-radius: 6px;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--amber);
+  margin-bottom: 22px;
+}
+.ribbon .mono { color: var(--amber); font-weight: 600; letter-spacing: 0.06em; }
+
+/* ---------- buttons ---------- */
+.btn {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn:hover { border-color: var(--cyan); }
+.btn.primary { background: var(--cyan); color: #04140f; border-color: var(--cyan); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- panel ---------- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+.grid { display: grid; gap: 16px; }
+.grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ---------- stat tiles ---------- */
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+.tile .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); }
+.tile .value { font-family: var(--mono); font-size: 26px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.tile .foot { font-size: 11px; color: var(--ink-dim); margin-top: 4px; }
+
+/* ---------- candidate card ---------- */
+.candcard {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.candcard .top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.candcard .sym { font-family: var(--mono); font-size: 18px; font-weight: 600; letter-spacing: 0.04em; }
+.candcard .cat { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+.scorebig { font-family: var(--mono); font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; text-align: right; }
+.scorebig .max { font-size: 13px; color: var(--ink-faint); }
+
+.statusbadge {
+  display: inline-block; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; padding: 3px 8px; border-radius: 4px; margin-top: 6px;
+  text-transform: uppercase;
+}
+.statusbadge.QUALIFIED { background: rgba(56,214,196,0.14); color: var(--cyan); border: 1px solid rgba(56,214,196,0.4); }
+.statusbadge.WATCH { background: rgba(229,168,75,0.14); color: var(--amber); border: 1px solid rgba(229,168,75,0.4); }
+.statusbadge.SKIP { background: var(--panel-2); color: var(--ink-faint); border: 1px solid var(--line); }
+
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+.metrics .m { background: var(--panel); padding: 10px 12px; }
+.metrics .m .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+.metrics .m .v { font-family: var(--mono); font-size: 14px; margin-top: 3px; }
+.chip { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+.chip.ok { color: var(--cyan); }
+.chip.pending { color: var(--amber); }
+.chip.no { color: var(--ink-faint); }
+
+/* ---------- SIGNATURE: score ledger ---------- */
+/* Every component is a signed horizontal bar from a centre axis. This is the
+   "not a black box" promise made visual: you see exactly what built the score. */
+.ledger { padding: 4px 0 2px; }
+.ledger .row { display: grid; grid-template-columns: 130px 1fr 42px; align-items: center; gap: 10px; padding: 3px 16px; }
+.ledger .name { font-size: 11px; color: var(--ink-dim); }
+.ledger .reason { font-size: 10px; color: var(--ink-faint); }
+.ledger .track { position: relative; height: 14px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.ledger .axis { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.ledger .fill { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+.ledger .fill.pos { left: 50%; background: linear-gradient(90deg, var(--cyan), rgba(56,214,196,0.6)); }
+.ledger .fill.neg { right: 50%; background: linear-gradient(270deg, var(--coral), rgba(229,105,95,0.6)); }
+.ledger .pts { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- table ---------- */
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-faint); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--line);
+}
+table.data td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+table.data tr:hover td { background: var(--panel-2); }
+
+/* ---------- forms ---------- */
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); }
+.field input {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+  color: var(--ink); font-family: var(--mono); font-size: 13px; padding: 8px 10px;
+}
+.field input:focus { outline: none; border-color: var(--cyan); }
+
+.section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); margin: 26px 0 12px; }
+
+.empty { color: var(--ink-faint); font-size: 13px; padding: 40px; text-align: center; border: 1px dashed var(--line); border-radius: 8px; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; display: flex; overflow-x: auto; padding: 12px; }
+  .nav { display: flex; }
+  .brand { display: none; }
+  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
+}

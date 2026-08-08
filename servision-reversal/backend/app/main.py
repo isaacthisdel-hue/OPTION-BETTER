@@ -1,0 +1,157 @@
+"""FastAPI application.
+
+Endpoints:
+  GET  /health                     health check (Railway)
+  GET  /api/candidates             latest scored candidates
+  POST /api/scan                   trigger one scan pass now
+  GET  /api/paper-trades           list paper trades
+  GET  /api/stats                  strategy statistics
+  GET  /api/projection             estimated paper revenue (from tracked results)
+  POST /api/backtest               run a backtest (events supplied or synthetic)
+  GET  /api/strategy-versions      list versions
+  POST /api/strategy-versions      create a version
+  GET  /api/stream                 SSE stream of latest scan results
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
+
+from .core.config import get_settings
+from .core.db import get_db, engine
+from .models import Base, Backtest, Observation, PaperTrade, StrategyVersion
+from .scanner.config import StrategyConfig
+from .scanner.service import scan_once
+from .services.stats import paper_trade_stats, project_paper_revenue
+
+settings = get_settings()
+app = FastAPI(title="Reversal Research API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+# Latest scan results kept in memory for the SSE/candidates endpoints.
+_latest: list[dict] = []
+
+
+@app.on_event("startup")
+def _startup():
+    Base.metadata.create_all(bind=engine)
+    # Ensure a default strategy version exists.
+    from .core.db import SessionLocal
+    db = SessionLocal()
+    try:
+        exists = db.execute(select(StrategyVersion)).first()
+        if not exists:
+            cfg = StrategyConfig()
+            db.add(StrategyVersion(label=cfg.version_label,
+                                   config_json=cfg.to_dict(), notes="default"))
+            db.commit()
+    finally:
+        db.close()
+
+
+def _active_version(db: Session) -> StrategyVersion:
+    return db.execute(select(StrategyVersion).order_by(StrategyVersion.id.desc())).scalars().first()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/candidates")
+def candidates():
+    return {"candidates": _latest, "count": len(_latest)}
+
+
+@app.post("/api/scan")
+async def scan(db: Session = Depends(get_db)):
+    global _latest
+    sv = _active_version(db)
+    cfg = StrategyConfig.from_dict(sv.config_json)
+    _latest = await scan_once(db, cfg, sv.id)
+    return {"scanned": len(_latest), "candidates": _latest}
+
+
+@app.get("/api/paper-trades")
+def paper_trades(db: Session = Depends(get_db)):
+    rows = db.execute(select(PaperTrade).order_by(PaperTrade.id.desc()).limit(200)).scalars().all()
+    return {"paper_trades": [
+        {"id": t.id, "symbol": t.symbol, "setup": t.setup, "instrument": t.instrument,
+         "label": "QUALIFIED PAPER-TRADE SETUP", "entry_price": t.entry_price,
+         "stop_price": t.stop_price, "target1": t.target1, "target2": t.target2,
+         "status": t.status, "exit_price": t.exit_price, "exit_reason": t.exit_reason,
+         "return_pct": t.return_pct, "score_at_entry": t.score_at_entry}
+        for t in rows
+    ]}
+
+
+@app.get("/api/stats")
+def stats(db: Session = Depends(get_db)):
+    return paper_trade_stats(db)
+
+
+@app.get("/api/projection")
+def projection(capital: float = 10000.0, trades_per_day: float = 2.0,
+               days: int = 5, db: Session = Depends(get_db)):
+    return project_paper_revenue(db, capital=capital,
+                                 trades_per_day=trades_per_day, days=days)
+
+
+@app.get("/api/strategy-versions")
+def list_versions(db: Session = Depends(get_db)):
+    rows = db.execute(select(StrategyVersion).order_by(StrategyVersion.id.desc())).scalars().all()
+    return {"versions": [
+        {"id": v.id, "label": v.label, "config": v.config_json, "notes": v.notes}
+        for v in rows
+    ]}
+
+
+@app.post("/api/strategy-versions")
+def create_version(payload: dict, db: Session = Depends(get_db)):
+    cfg = StrategyConfig.from_dict(payload.get("config", {}))
+    v = StrategyVersion(label=payload.get("label", cfg.version_label),
+                        config_json=cfg.to_dict(), notes=payload.get("notes", ""))
+    db.add(v)
+    db.commit()
+    return {"id": v.id, "label": v.label}
+
+
+@app.post("/api/backtest")
+def backtest(payload: dict, db: Session = Depends(get_db)):
+    """Run a backtest. If no events are provided, uses the synthetic sample set
+    from backtesting.sample so you can see the pipeline work before wiring real
+    historical data. Real events should be supplied by a data-loading job."""
+    from .backtesting.engine import run_backtest, HistoricalEvent
+    from .backtesting.sample import synthetic_events
+
+    sv = _active_version(db)
+    cfg = StrategyConfig.from_dict(sv.config_json)
+
+    events = synthetic_events()  # replace with real loader when data plan is added
+    result = run_backtest(events, cfg)
+
+    bt = Backtest(strategy_version_id=sv.id, params_json=payload or {},
+                  results_json=result["strategy"], label=payload.get("label", "sample"))
+    db.add(bt)
+    db.commit()
+    return result
+
+
+@app.get("/api/stream")
+async def stream():
+    async def gen():
+        while True:
+            yield {"event": "candidates", "data": json.dumps(_latest)}
+            await asyncio.sleep(settings.scan_interval_seconds)
+    return EventSourceResponse(gen())

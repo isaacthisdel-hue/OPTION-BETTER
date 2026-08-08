@@ -1,0 +1,56 @@
+"""Application configuration. All secrets come from environment variables.
+
+Never hardcode API keys or DB credentials here. Locally these load from a
+git-ignored .env file; in production they are set in the Railway dashboard.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    # --- Database ---
+    database_url: str = Field(
+        default="postgresql+psycopg2://postgres:postgres@localhost:5432/reversal",
+        alias="DATABASE_URL",
+    )
+
+    # --- Data provider selection ---
+    # "finnhub" (default free), "fmp", or "massive" (paid, add key + switch)
+    provider: str = Field(default="finnhub", alias="PROVIDER")
+    finnhub_api_key: str = Field(default="", alias="FINNHUB_API_KEY")
+    fmp_api_key: str = Field(default="", alias="FMP_API_KEY")
+    massive_api_key: str = Field(default="", alias="MASSIVE_API_KEY")
+
+    # --- Scanner behaviour ---
+    scan_interval_seconds: int = Field(default=60, alias="SCAN_INTERVAL_SECONDS")
+    # Comma-separated watchlist used on the free tier (can't scan whole market
+    # on 60 calls/min). Empty means "use the earnings-calendar universe".
+    watchlist: str = Field(default="", alias="WATCHLIST")
+    max_universe_size: int = Field(default=40, alias="MAX_UNIVERSE_SIZE")
+
+    # --- Market hours (US/Eastern) ---
+    market_tz: str = "America/New_York"
+
+    # --- CORS: comma-separated allowed origins for the frontend ---
+    cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
+
+    @property
+    def watchlist_symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
