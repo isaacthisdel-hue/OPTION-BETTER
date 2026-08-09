@@ -26,7 +26,7 @@ class FMPProvider(MarketDataProvider):
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8), reraise=True)
     async def _get(self, path: str, **params) -> list | dict:
         params["apikey"] = self._key
         r = await self._client.get(f"{BASE}{path}", params=params)
@@ -37,7 +37,7 @@ class FMPProvider(MarketDataProvider):
         interval = {"1": "1min", "5": "5min", "15": "15min"}.get(resolution, "5min")
         try:
             d = await self._get(f"/historical-chart/{interval}/{symbol}")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return []
         import datetime as dt
         out = []
@@ -51,7 +51,7 @@ class FMPProvider(MarketDataProvider):
     async def daily_bars(self, symbol, days):
         try:
             d = await self._get(f"/historical-price-full/{symbol}", timeseries=days)
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return []
         import datetime as dt
         out = []
@@ -64,7 +64,7 @@ class FMPProvider(MarketDataProvider):
     async def quote(self, symbol):
         try:
             d = await self._get(f"/quote/{symbol}")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         if not d:
             return None
@@ -75,7 +75,7 @@ class FMPProvider(MarketDataProvider):
     async def earnings_calendar(self, from_date, to_date):
         try:
             d = await self._get("/earning_calendar", **{"from": from_date, "to": to_date})
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return []
         return [{
             "symbol": e.get("symbol"), "date": e.get("date"),
@@ -87,7 +87,7 @@ class FMPProvider(MarketDataProvider):
     async def earnings_surprise(self, symbol):
         try:
             d = await self._get(f"/earnings-surprises/{symbol}")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         if not d:
             return None
@@ -107,7 +107,7 @@ class FMPProvider(MarketDataProvider):
         try:
             ratios = await self._get(f"/ratios-ttm/{symbol}")
             profile = await self._get(f"/profile/{symbol}")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         r = (ratios or [{}])[0]
         p = (profile or [{}])[0]

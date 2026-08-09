@@ -30,7 +30,7 @@ class FinnhubProvider(MarketDataProvider):
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8), reraise=True)
     async def _get(self, path: str, **params) -> dict | list:
         params["token"] = self._key
         r = await self._client.get(f"{BASE}{path}", params=params)
@@ -44,7 +44,7 @@ class FinnhubProvider(MarketDataProvider):
                 "/stock/candle", symbol=symbol, resolution=res,
                 **{"from": start_epoch, "to": end_epoch},
             )
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return []
         if not isinstance(data, dict) or data.get("s") != "ok":
             return []
@@ -63,7 +63,7 @@ class FinnhubProvider(MarketDataProvider):
     async def quote(self, symbol):
         try:
             d = await self._get("/quote", symbol=symbol)
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         if not d or d.get("c") in (None, 0):
             return None
@@ -81,7 +81,7 @@ class FinnhubProvider(MarketDataProvider):
                 "/calendar/earnings",
                 **{"from": from_date, "to": to_date},
             )
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return []
         out = []
         for e in (d or {}).get("earningsCalendar", []):
@@ -99,7 +99,7 @@ class FinnhubProvider(MarketDataProvider):
     async def earnings_surprise(self, symbol):
         try:
             d = await self._get("/stock/earnings", symbol=symbol, limit=1)
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         if not d:
             return None
@@ -120,7 +120,7 @@ class FinnhubProvider(MarketDataProvider):
     async def fundamentals(self, symbol):
         try:
             d = await self._get("/stock/metric", symbol=symbol, metric="all")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             return None
         m = (d or {}).get("metric", {})
         if not m:
