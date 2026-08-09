@@ -37,7 +37,7 @@ git ls-files | grep -i env    # should show only *.env.example
 
 ### 2b. API service
 1. Railway will create a service from your repo. Open it → **Settings** →
-   set **Root Directory** to `backend`.
+   set **Root Directory** to `servision-reversal/backend`.
 2. **Variables** tab → add:
    - `DATABASE_URL` → click "Add Reference" → select the Postgres `DATABASE_URL`.
    - `FINNHUB_API_KEY` → your key
@@ -51,7 +51,7 @@ git ls-files | grep -i env    # should show only *.env.example
 
 ### 2c. Worker service (optional but recommended)
 1. In the same project: **New** → **Empty Service** → connect the same repo.
-2. **Settings** → Root Directory `backend`; **Start Command**: `python -m app.worker`.
+2. **Settings** → Root Directory `servision-reversal/backend`; **Start Command**: `python -m app.worker`.
 3. **Variables**: add the same variables as the API (reference the same
    `DATABASE_URL`, same API keys).
 4. Deploy. This process scans on an interval during market hours and resolves
@@ -66,7 +66,7 @@ git ls-files | grep -i env    # should show only *.env.example
 ## 3. Vercel — frontend
 
 1. https://vercel.com → **Add New** → **Project** → import your GitHub repo.
-2. **Root Directory**: `frontend`.
+2. **Root Directory**: `servision-reversal/frontend`.
 3. **Environment Variables**: add
    - `NEXT_PUBLIC_API_BASE` → your Railway API URL (e.g. `https://<your-api>.up.railway.app`), no trailing slash.
 4. Deploy. Vercel auto-detects Next.js.
