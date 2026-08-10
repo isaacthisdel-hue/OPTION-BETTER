@@ -334,10 +334,10 @@ table.data tr:hover td { background: var(--panel-2); }
    Values below intentionally re-declare earlier ones; later CSS wins.
    ============================================================ */
 :root {
-  --bg: #f4f3ee;          /* warm paper */
-  --panel: #ffffff;
-  --panel-2: #efeee7;     /* soft warm */
-  --line: #e4e2d8;
+  --bg: #e4e1d6;          /* warm stone */
+  --panel: #f6f5ef;
+  --panel-2: #e9e6db;     /* soft warm */
+  --line: #d3d0c3;
   --ink: #1a1e19;         /* near-black, faintly warm */
   --ink-dim: #5c625a;
   --ink-faint: #9aa094;
