@@ -157,8 +157,19 @@ def projection(capital: float = 10000.0, trades_per_day: float = 2.0,
 def list_versions(db: Session = Depends(get_db)):
     rows = db.execute(select(StrategyVersion).order_by(StrategyVersion.id.desc())).scalars().all()
     eff = _active_version(db)
+
+    def _latest_result(vid):
+        r = db.execute(select(Backtest).where(Backtest.strategy_version_id == vid)
+                       .order_by(Backtest.id.desc())).scalars().first()
+        if not r or not r.results_json:
+            return None
+        m = r.results_json
+        return {"win_rate": m.get("win_rate"), "avg_return": m.get("avg_return"),
+                "trades": m.get("trades"), "profit_factor": m.get("profit_factor")}
+
     return {"active_id": eff.id if eff else None, "versions": [
-        {"id": v.id, "label": v.label, "config": v.config_json, "notes": v.notes}
+        {"id": v.id, "label": v.label, "config": v.config_json, "notes": v.notes,
+         "result": _latest_result(v.id)}
         for v in rows
     ]}
 
@@ -226,34 +237,18 @@ def create_version(payload: dict, db: Session = Depends(get_db)):
     return {"id": v.id, "label": v.label}
 
 
-@app.post("/api/backtest")
-def backtest(payload: dict, db: Session = Depends(get_db)):
-    """Run a backtest on REAL recent intraday data (Alpha Vantage). Needs a free
-    ALPHAVANTAGE_API_KEY set in the environment. No synthetic fallback."""
-    from .backtesting.engine import run_backtest
+def _load_backtest_events(db: Session):
+    """Load real events once. Returns (events, meta) or (None, error_dict)."""
     from .backtesting.loader import load_recent_events, LoaderError
-    from .backtesting.reversal_model import (
-        build_reversal_model, equity_curve, per_stock_series, backtest_insights,
-    )
-    from .core.config import get_settings
-
-    settings = get_settings()
-    sv = _active_version(db)
-    cfg = StrategyConfig.from_dict(sv.config_json)
-
     if not (settings.twelvedata_api_key or settings.fmp_api_key or settings.alphavantage_api_key):
-        return {
-            "available": False,
-            "error": "No real-data key set. Add a free market-data key to backtest on real data.",
-            "how": "Recommended: twelvedata.com (free, 800/day) -> Railway Variables -> TWELVEDATA_API_KEY. FMP or Alpha Vantage keys also work.",
-        }
-
+        return None, {"available": False,
+                      "error": "No real-data key set. Add a free market-data key to backtest on real data.",
+                      "how": "Recommended: twelvedata.com (free, 800/day) -> Railway Variables -> TWELVEDATA_API_KEY."}
     tickers_csv, max_t = _effective_tickers(db)
     try:
         events, meta = load_recent_events(settings, tickers_csv=tickers_csv, max_tickers=max_t)
     except LoaderError as e:
-        return {"available": False, "error": str(e)}
-
+        return None, {"available": False, "error": str(e)}
     if not events:
         reqn = len(meta.get("tickers_requested") or [1])
         rl = meta.get("rate_limited", 0)
@@ -263,10 +258,16 @@ def backtest(payload: dict, db: Session = Depends(get_db)):
             msg = "Some tickers were rate-limited. Wait a minute and retry."
         else:
             msg = ("Loaded data but found no usable sessions for: "
-                   + ", ".join(meta.get("tickers_requested", []))
-                   + ". Edit the watchlist below and retry.")
-        return {"available": False, "error": msg, "meta": meta}
+                   + ", ".join(meta.get("tickers_requested", [])) + ". Edit the watchlist and retry.")
+        return None, {"available": False, "error": msg, "meta": meta}
+    return events, meta
 
+
+def _build_backtest_result(db, cfg, sv_id, events, meta, save_model=True):
+    from .backtesting.engine import run_backtest
+    from .backtesting.reversal_model import (
+        build_reversal_model, equity_curve, per_stock_series, backtest_insights,
+    )
     result = run_backtest(events, cfg)
     result["available"] = True
     result["meta"] = meta
@@ -274,13 +275,51 @@ def backtest(payload: dict, db: Session = Depends(get_db)):
     result["equity_curve"] = equity_curve(result.get("trades", []))
     result["per_stock"] = per_stock_series(events, result.get("trades", []), cfg)
     result["insights"] = backtest_insights(result, meta, cfg)
-    _set_setting(db, "reversal_model", result["reversal_model"])
-
-    bt = Backtest(strategy_version_id=sv.id, params_json=payload or {},
-                  results_json=result["strategy"], label=(payload or {}).get("label", "real"))
-    db.add(bt)
+    if save_model:
+        _set_setting(db, "reversal_model", result["reversal_model"])
+    db.add(Backtest(strategy_version_id=sv_id, params_json={},
+                    results_json=result["strategy"], label="real"))
     db.commit()
     return result
+
+
+@app.post("/api/backtest")
+def backtest(payload: dict, db: Session = Depends(get_db)):
+    """Backtest the ACTIVE version on real recent intraday data."""
+    sv = _active_version(db)
+    cfg = StrategyConfig.from_dict(sv.config_json)
+    events, meta = _load_backtest_events(db)
+    if events is None:
+        return meta
+    return _build_backtest_result(db, cfg, sv.id, events, meta, save_model=True)
+
+
+@app.post("/api/strategy-versions/{vid}/backtest")
+def backtest_version(vid: int, db: Session = Depends(get_db)):
+    v = db.get(StrategyVersion, vid)
+    if not v:
+        return {"available": False, "error": "Version not found."}
+    cfg = StrategyConfig.from_dict(v.config_json)
+    events, meta = _load_backtest_events(db)
+    if events is None:
+        return meta
+    return _build_backtest_result(db, cfg, vid, events, meta, save_model=False)
+
+
+@app.post("/api/optimize")
+def optimize_route(payload: dict, db: Session = Depends(get_db)):
+    """Auto-tune the active version's params against real events (hill-climb)."""
+    from .backtesting.optimizer import optimize
+    sv = _active_version(db)
+    base = StrategyConfig.from_dict(sv.config_json)
+    events, meta = _load_backtest_events(db)
+    if events is None:
+        return meta
+    iters = int((payload or {}).get("iterations", 40))
+    out = optimize(events, base, iterations=max(5, min(iters, 80)))
+    out["available"] = True
+    out["meta"] = meta
+    return out
 
 
 def _saved_list(db: Session):

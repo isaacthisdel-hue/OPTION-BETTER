@@ -25,6 +25,26 @@ export default function Backtest() {
     } catch (e: any) { setTickMsg(e.message); }
   }
 
+  const [optimizing, setOptimizing] = useState(false);
+  const [opt, setOpt] = useState<any>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  async function optimize() {
+    setOptimizing(true); setErr(null); setOpt(null); setSavedMsg(null);
+    try {
+      const r = await api.optimize();
+      if (r.available) setOpt(r); else setErr(r.error || "optimize failed");
+    } catch (e: any) { setErr(e.message); } finally { setOptimizing(false); }
+  }
+  async function saveOpt() {
+    if (!opt) return;
+    try {
+      const label = "OPT-" + new Date().toISOString().slice(5, 16).replace(/[-:T]/g, "");
+      await api.createVersion(label, opt.best_config, "auto-optimized");
+      setSavedMsg("saved as new version ✓");
+    } catch (e: any) { setSavedMsg(e.message); }
+  }
+
   async function run() {
     setLoading(true);
     setErr(null);
@@ -50,9 +70,14 @@ export default function Backtest() {
           <div className="eyebrow">Historical replay · real data</div>
           <h1>Backtest</h1>
         </div>
-        <button className="btn primary" onClick={run} disabled={loading}>
-          {loading ? "RUNNING…" : "RUN BACKTEST"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={optimize} disabled={optimizing}>
+            {optimizing ? "OPTIMIZING…" : "AUTO-OPTIMIZE"}
+          </button>
+          <button className="btn primary" onClick={run} disabled={loading}>
+            {loading ? "RUNNING…" : "RUN BACKTEST"}
+          </button>
+        </div>
       </div>
       <p className="pagesub">
         Replays the same scoring code over real recent intraday sessions with no
@@ -78,6 +103,33 @@ export default function Backtest() {
           Each ticker is one data call per run. Saved to the app — no redeploy needed.
         </div>
       </div>
+
+      {opt && (
+        <>
+          <div className="section-title">Auto-optimize result</div>
+          <div className="panel" style={{ marginBottom: 22 }}>
+            <div className="grid cols-2">
+              <div>
+                <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>Before (active version)</div>
+                <MetricsMini m={opt.base_metrics} />
+              </div>
+              <div>
+                <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>After (best found)</div>
+                <MetricsMini m={opt.best_metrics} />
+              </div>
+            </div>
+            <div className="faint" style={{ fontSize: 12, marginTop: 12 }}>
+              {opt.improved
+                ? "Changed: " + Object.entries(opt.changed_params || {}).map(([k, v]) => `${k}=${v}`).join(", ")
+                : "No change beat the current settings on this data."}
+            </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
+              <button className="btn primary" onClick={saveOpt} disabled={!opt.improved}>SAVE AS NEW VERSION</button>
+              {savedMsg && <span className="mono" style={{ fontSize: 12, color: "var(--cyan)" }}>{savedMsg}</span>}
+            </div>
+          </div>
+        </>
+      )}
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
 
@@ -326,6 +378,17 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: str
     <div className="tile">
       <div className="label">{label}</div>
       <div className={`value ${tone || ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function MetricsMini({ m }: { m: any }) {
+  if (!m) return <div className="faint">—</div>;
+  return (
+    <div className="grid cols-3">
+      <Tile label="Trades" value={`${m.trades ?? "—"}`} />
+      <Tile label="Win rate" value={m.win_rate != null ? `${m.win_rate}%` : "—"} />
+      <Tile label="Avg ret" value={fmtPct(m.avg_return)} tone={sign(m.avg_return)} />
     </div>
   );
 }

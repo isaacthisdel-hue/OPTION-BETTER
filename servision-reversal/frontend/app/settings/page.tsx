@@ -104,6 +104,7 @@ export default function Settings() {
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [btBusy, setBtBusy] = useState<number | null>(null);
 
   async function loadVersions() {
     try {
@@ -119,6 +120,14 @@ export default function Settings() {
 
   async function activate(id: number) {
     try { await api.activateVersion(id); loadVersions(); } catch (e: any) { setErr(e.message); }
+  }
+  async function backtestVersion(id: number) {
+    setBtBusy(id); setErr(null);
+    try {
+      const d = await api.backtestVersion(id);
+      if (d.available === false) setErr(d.error || "Backtest failed.");
+      await loadVersions();
+    } catch (e: any) { setErr(e.message); } finally { setBtBusy(null); }
   }
   async function removeVersion(id: number) {
     try {

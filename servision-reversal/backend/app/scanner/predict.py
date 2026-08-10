@@ -1,10 +1,10 @@
 """Directional movement prediction.
 
-For each scanned stock, weigh reversal evidence against continuation evidence
-from the SAME measured facts the scorer uses, then call a direction (REVERSAL vs
-CONTINUATION), a predicted % move, a confidence, and the matching option side
-(CALL/PUT) aimed at next Friday. Transparent by construction — the two signal
-scores are returned so nothing is hidden.
+For each scanned stock we (a) decide direction — REVERSAL vs CONTINUATION — by
+weighing reversal evidence against continuation evidence, and (b) estimate a
+CONTINUOUS predicted % move from the actual signals (move size, VWAP stretch,
+volume, confirmation), scaled by confidence and optionally calibrated against the
+learned backtest tiers. No flat constants — the number moves with the setup.
 """
 from __future__ import annotations
 
@@ -14,47 +14,65 @@ from ..backtesting.reversal_model import _next_friday, estimate_reversal
 
 def predict_movement(cand: Candidate, saved_model: dict | None = None) -> dict:
     move = cand.move_pct if cand.move_pct is not None else 0.0
+    mv = abs(move)
+    vwap_d = cand.vwap_distance_pct or 0.0
+    vext = abs(vwap_d) if vwap_d < 0 else 0.0          # stretched BELOW vwap
+    vol = cand.volume_ratio or 0.0
+    fresh_low = (cand.minutes_since_new_low is not None and cand.minutes_since_new_low < 10)
+    stalled = (cand.minutes_since_new_low is not None and cand.minutes_since_new_low >= 15)
 
+    # --- direction evidence ---
     rev = 0.0
     cont = 0.0
     if cand.higher_low:
         rev += 2.0
     if cand.vwap_reclaim:
         rev += 2.0
-    if cand.minutes_since_new_low is not None and cand.minutes_since_new_low >= 15:
+    if stalled:
         rev += 1.5
-    if cand.vwap_distance_pct is not None and cand.vwap_distance_pct <= -3:
-        rev += 1.0  # stretched below VWAP = oversold snap-back fuel
-
+    if vext >= 3:
+        rev += 1.0
     if cand.higher_low is False:
         cont += 1.0
     if cand.vwap_reclaim is False:
         cont += 1.5
-    if cand.minutes_since_new_low is not None and cand.minutes_since_new_low < 10:
-        cont += 2.0  # fresh lows = trend still pushing
-    if (cand.vwap_distance_pct is not None and cand.vwap_distance_pct < 0
-            and not cand.vwap_reclaim):
+    if fresh_low:
+        cont += 2.0
+    if vwap_d < 0 and not cand.vwap_reclaim:
         cont += 1.0
-    if (cand.volume_ratio or 0) >= 2 and abs(move) >= 3:
-        cont += 1.0  # heavy volume behind the move
+    if vol >= 2 and mv >= 3:
+        cont += 1.0
 
     total = rev + cont
     direction = "REVERSAL" if rev > cont else "CONTINUATION"
     margin = (abs(rev - cont) / total) if total else 0.0
     confidence = "high" if margin >= 0.5 else "medium" if margin >= 0.25 else "low"
+    conf_mult = {"high": 1.15, "medium": 1.0, "low": 0.8}[confidence]
 
-    rev_mag = estimate_reversal(move, saved_model)["estimated_reversal_pct"]
+    # --- continuous magnitudes ---
+    # reversal: retrace a slice of the drop + snap-back from vwap stretch + volume kicker
+    rev_mag = 0.35 * mv + 0.40 * vext + min(vol, 5.0) * 0.20
+    # continuation: momentum persists — a slice of the move + volume + fresh-low push
+    cont_mag = 0.45 * mv + min(vol, 5.0) * 0.25 + (1.0 if fresh_low else 0.0)
+
+    # calibrate reversal magnitude against the learned tiers when available
+    if saved_model:
+        est = estimate_reversal(move, saved_model)
+        if est.get("confidence") != "heuristic":
+            rev_mag = 0.5 * rev_mag + 0.5 * est["estimated_reversal_pct"]
 
     if direction == "REVERSAL":
-        # reversal of a down move is up (and vice-versa)
-        predicted = rev_mag if move < 0 else -rev_mag
+        mag = rev_mag * conf_mult
+        predicted = mag if move < 0 else -mag       # reversal of a down move is up
     else:
-        # continuation extends the current move in the same direction
-        mag = min(abs(move) * 0.5, 10.0)
-        predicted = -mag if move < 0 else mag
+        mag = cont_mag * conf_mult
+        predicted = -mag if move < 0 else mag        # continuation extends the move
 
-    predicted = round(predicted, 1)
+    predicted = round(max(-25.0, min(25.0, predicted)), 1)
+    if abs(predicted) < 0.3:
+        predicted = 0.3 if predicted >= 0 else -0.3
     opt = "CALL" if predicted >= 0 else "PUT"
+
     return {
         "prediction": direction,
         "direction_bias": "UP" if predicted >= 0 else "DOWN",

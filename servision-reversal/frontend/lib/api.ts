@@ -31,6 +31,10 @@ export const api = {
   backtest: (payload: Record<string, unknown> = {}) => post("/api/backtest", payload),
   versions: () => get("/api/strategy-versions"),
   activateVersion: (id: number) => post(`/api/strategy-versions/${id}/activate`),
+  backtestVersion: (id: number) => post(`/api/strategy-versions/${id}/backtest`),
+  createVersion: (label: string, config: Record<string, unknown>, notes = "") =>
+    post("/api/strategy-versions", { label, config, notes }),
+  optimize: () => post("/api/optimize", {}),
   deleteVersion: (id: number) => del(`/api/strategy-versions/${id}`),
   savedList: () => get("/api/saved"),
   saveIdea: (idea: Record<string, unknown>) => post("/api/saved", idea),
