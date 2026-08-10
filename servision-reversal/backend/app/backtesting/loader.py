@@ -103,14 +103,15 @@ def _providers(settings):
     return p
 
 
-def load_recent_events(settings=None):
+def load_recent_events(settings=None, tickers_csv=None, max_tickers=None):
     settings = settings or get_settings()
     providers = _providers(settings)
     if not providers:
         raise LoaderError("No data key configured.")
 
-    tickers = [t.strip().upper() for t in settings.backtest_tickers.split(",") if t.strip()]
-    tickers = tickers[: settings.backtest_max_tickers]
+    src = tickers_csv if tickers_csv is not None else settings.backtest_tickers
+    tickers = [t.strip().upper() for t in src.split(",") if t.strip()]
+    tickers = tickers[: (max_tickers or settings.backtest_max_tickers)]
     lookback = settings.backtest_lookback_days
     floor = settings.backtest_min_gap_pct
     per_ticker_cap = 3

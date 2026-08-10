@@ -167,3 +167,52 @@ def per_stock_series(events: list[HistoricalEvent], trades: list[dict],
 def _session_date_str(epoch: int) -> str:
     import pytz
     return dt.datetime.fromtimestamp(epoch, pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
+
+
+def backtest_insights(result: dict, meta: dict, cfg) -> list[dict]:
+    """Plain-language 'what went wrong / what to try' recommendations."""
+    out = []
+    def add(level, text):
+        out.append({"level": level, "text": text})
+
+    skipped = meta.get("skipped", []) if meta else []
+    if skipped:
+        names = ", ".join(x.get("symbol", "?") for x in skipped)
+        if meta.get("rate_limited"):
+            add("warn", f"Rate-limited on {names}. Wait a minute, or add a Twelve Data key (800/day) for headroom.")
+        else:
+            add("warn", f"No usable data for {names}. Swap them out in the watchlist below.")
+
+    events = (meta or {}).get("events", 0)
+    if events and events < 6:
+        add("info", f"Only {events} event(s) loaded — add more tickers or widen the lookback for a firmer read.")
+
+    s_ = result.get("strategy", {})
+    n = s_.get("trades", 0)
+    if n == 0:
+        add("warn", f"No setup reached QUALIFIED (score ≥ {cfg.min_score_to_qualify}). Lower 'Score → qualify' in Settings, or loosen entry criteria, to actually test entries.")
+    else:
+        if s_.get("insufficient_sample"):
+            add("info", f"{n} trades — small sample. Treat results as directional, not proof.")
+        wr = s_.get("win_rate")
+        if wr is not None and wr < 40:
+            add("warn", f"Win rate {wr}% is low — the reversal edge isn't showing on this sample.")
+        pf = s_.get("profit_factor")
+        if pf is not None and pf < 1:
+            add("warn", "Profit factor under 1 — losing expectancy on this sample.")
+        ctrl = (result.get("controls") or {}).get("buy_the_dip", {})
+        if ctrl.get("avg_return") is not None and s_.get("avg_return") is not None \
+                and ctrl["avg_return"] >= s_["avg_return"] and ctrl.get("trades", 0) >= 3:
+            add("warn", "'Buy the dip' baseline matched or beat the strategy — the confirmations may not be adding value here.")
+
+    rm = result.get("reversal_model", {})
+    best = None
+    for t in rm.get("tiers", []):
+        if t.get("n", 0) >= 3 and (best is None or t["median_reversion_pct"] > best["median_reversion_pct"]):
+            best = t
+    if best:
+        add("good", f"Strongest tier: {best['tier']} bounced a median {best['median_reversion_pct']}% by close ({best['positive_rate_pct']}% positive, n={best['n']}).")
+
+    if not out:
+        add("good", "Clean run — no issues flagged.")
+    return out

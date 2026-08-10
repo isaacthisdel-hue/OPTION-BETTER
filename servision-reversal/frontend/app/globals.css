@@ -393,3 +393,15 @@ table.data tr:hover td { background: var(--panel-2); }
 .conf.high { background: rgba(95,125,79,0.12); color: var(--cyan); border-color: rgba(95,125,79,0.40); }
 
 ::selection { background: rgba(95,125,79,0.22); }
+
+/* ---------- backtest recommendations ---------- */
+.insight { display: flex; gap: 8px; align-items: flex-start; padding: 9px 0; font-size: 13px; border-bottom: 1px solid var(--line); color: var(--ink); }
+.insight:last-child { border-bottom: none; }
+.insight .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: 0 0 auto; background: var(--ink-faint); }
+.insight.good .dot { background: var(--cyan); }
+.insight.info .dot { background: var(--amber); }
+.insight.warn .dot { background: var(--coral); }
+
+/* danger button */
+.btn.danger { border-color: rgba(176,85,60,0.4); color: var(--coral); }
+.btn.danger:hover { border-color: var(--coral); background: rgba(176,85,60,0.08); }

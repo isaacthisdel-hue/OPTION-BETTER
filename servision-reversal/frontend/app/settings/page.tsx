@@ -103,16 +103,30 @@ export default function Settings() {
   const [label, setLabel] = useState("V2");
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [activeId, setActiveId] = useState<number | null>(null);
 
-  useEffect(() => {
-    api
-      .versions()
-      .then((d) => {
-        setVersions(d.versions || []);
-        if (d.versions?.[0]) setCfg(d.versions[0].config);
-      })
-      .catch((e) => setErr(e.message));
-  }, []);
+  async function loadVersions() {
+    try {
+      const d = await api.versions();
+      setVersions(d.versions || []);
+      setActiveId(d.active_id ?? null);
+      setCfg((prev) => (Object.keys(prev).length ? prev : d.versions?.[0]?.config || {}));
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+  useEffect(() => { loadVersions(); }, []);
+
+  async function activate(id: number) {
+    try { await api.activateVersion(id); loadVersions(); } catch (e: any) { setErr(e.message); }
+  }
+  async function removeVersion(id: number) {
+    try {
+      const d = await api.deleteVersion(id);
+      if (!d.ok) setErr(d.error || "Could not delete.");
+      else { setErr(null); loadVersions(); }
+    } catch (e: any) { setErr(e.message); }
+  }
 
   async function save() {
     setSaved(false);

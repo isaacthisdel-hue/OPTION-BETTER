@@ -101,3 +101,12 @@ class Backtest(Base):
     params_json: Mapped[dict] = mapped_column(JSON)      # date range, filters, split
     results_json: Mapped[dict] = mapped_column(JSON)     # metrics + breakdowns
     label: Mapped[str] = mapped_column(String(120), default="")
+
+
+class AppSetting(Base):
+    """Simple key/value store for runtime app settings (editable watchlist,
+    active strategy version) that shouldn't require an env var / redeploy."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value_json: Mapped[dict] = mapped_column(JSON)

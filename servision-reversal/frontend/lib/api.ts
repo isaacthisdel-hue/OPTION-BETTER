@@ -14,6 +14,11 @@ async function post(path: string, body?: unknown) {
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 }
+async function del(path: string) {
+  const r = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+  return r.json();
+}
 
 export const api = {
   candidates: () => get("/api/candidates"),
@@ -25,6 +30,10 @@ export const api = {
     get(`/api/projection?capital=${capital}&trades_per_day=${tradesPerDay}&days=${days}`),
   backtest: (payload: Record<string, unknown> = {}) => post("/api/backtest", payload),
   versions: () => get("/api/strategy-versions"),
+  activateVersion: (id: number) => post(`/api/strategy-versions/${id}/activate`),
+  deleteVersion: (id: number) => del(`/api/strategy-versions/${id}`),
+  backtestTickers: () => get("/api/backtest-tickers"),
+  setBacktestTickers: (tickers: string, max?: number) => post("/api/backtest-tickers", { tickers, max }),
   base: BASE,
 };
 

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Ribbon } from "@/components/Ribbon";
 
@@ -8,6 +8,22 @@ export default function Backtest() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState(0);
+  const [tickers, setTickers] = useState("");
+  const [maxT, setMaxT] = useState(5);
+  const [tickMsg, setTickMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.backtestTickers().then((d) => { setTickers(d.tickers || ""); setMaxT(d.max || 5); }).catch(() => {});
+  }, []);
+
+  async function saveTickers() {
+    setTickMsg(null);
+    try {
+      const d = await api.setBacktestTickers(tickers, maxT);
+      if (d.ok) { setTickers(d.tickers); setMaxT(d.max); setTickMsg("saved ✓"); }
+      else setTickMsg(d.error || "error");
+    } catch (e: any) { setTickMsg(e.message); }
+  }
 
   async function run() {
     setLoading(true);
@@ -43,6 +59,25 @@ export default function Backtest() {
         look-ahead, then learns how big a reversal each kind of drop actually produced.
       </p>
       <Ribbon text="Research only. Reversal tiers are measured from real outcomes, not predictions. Options aims are next-Friday research signals — never orders." />
+
+      <div className="panel" style={{ marginBottom: 22 }}>
+        <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>Watchlist — stocks to backtest</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ flex: 1, minWidth: 240 }}>
+            <label>Tickers (comma-separated)</label>
+            <input value={tickers} onChange={(e) => setTickers(e.target.value)} placeholder="NBIS,COIN,SMCI,TSLA,AMD" />
+          </div>
+          <div className="field" style={{ maxWidth: 90 }}>
+            <label>Max</label>
+            <input type="number" value={maxT} onChange={(e) => setMaxT(+e.target.value)} />
+          </div>
+          <button className="btn primary" onClick={saveTickers}>SAVE</button>
+          {tickMsg && <span className="mono" style={{ fontSize: 12, color: "var(--cyan)" }}>{tickMsg}</span>}
+        </div>
+        <div className="faint" style={{ fontSize: 11, marginTop: 8 }}>
+          Each ticker is one data call per run. Saved to the app — no redeploy needed.
+        </div>
+      </div>
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
 
@@ -89,6 +124,20 @@ export default function Backtest() {
             </span>
           )}
         </div>
+      )}
+
+      {res?.insights && res.insights.length > 0 && (
+        <>
+          <div className="section-title">Recommendations</div>
+          <div className="panel" style={{ marginBottom: 6 }}>
+            {res.insights.map((it: any, i: number) => (
+              <div key={i} className={`insight ${it.level}`}>
+                <span className="dot" />
+                <span>{it.text}</span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {rm && rm.tiers && (
