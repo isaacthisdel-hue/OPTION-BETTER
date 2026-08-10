@@ -59,4 +59,5 @@ export type Candidate = {
   reversal_confidence?: string;
   option_aim?: { direction: string; expiry_next_friday: string; expected_move_pct: number };
   spark?: number[];
+  market_cap_billions?: number | null;
 };

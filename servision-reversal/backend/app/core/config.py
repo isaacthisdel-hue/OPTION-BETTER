@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # on 60 calls/min). Empty means "use the earnings-calendar universe".
     watchlist: str = Field(default="", alias="WATCHLIST")
     max_universe_size: int = Field(default=40, alias="MAX_UNIVERSE_SIZE")
+    min_market_cap_billions: float = Field(default=10.0, alias="MIN_MARKET_CAP_BILLIONS")
 
     # --- Market hours (US/Eastern) ---
     market_tz: str = "America/New_York"

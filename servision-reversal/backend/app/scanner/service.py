@@ -28,7 +28,28 @@ from ..backtesting.reversal_model import estimate_reversal
 
 # symbol -> {"fetched_at": epoch, "d": enriched_result_dict}
 _CACHE: dict[str, dict] = {}
+_MCAP_CACHE: dict[str, tuple] = {}   # symbol -> (fetched_at, billions|None)
+_MCAP_TTL = 86400
 LAST_SCAN_META: dict = {}
+
+
+async def _market_cap_billions(provider, symbol: str):
+    """Market cap in $B, cached for a day. Normalises provider units (Finnhub
+    reports millions, FMP reports absolute dollars). Returns None if unknown."""
+    e = _MCAP_CACHE.get(symbol)
+    if e and (time.time() - e[0]) < _MCAP_TTL:
+        return e[1]
+    val = None
+    try:
+        f = await provider.fundamentals(symbol)
+        raw = (f or {}).get("market_cap")
+        if raw:
+            raw = float(raw)
+            val = raw / 1e9 if raw > 1e7 else raw / 1000.0  # dollars vs millions
+    except Exception:  # noqa
+        val = None
+    _MCAP_CACHE[symbol] = (time.time(), val)
+    return val
 
 
 def _et_minute_of_day(epoch: int, tz: str) -> int:
@@ -113,13 +134,22 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
 
     fetched = 0
     try:
+        min_cap = getattr(settings, "min_market_cap_billions", 0.0)
+
         async def _one(symbol: str):
             try:
-                return symbol, await build_candidate(
+                cand = await build_candidate(
                     provider, symbol, cfg, now, settings.market_tz,
                     catalysts.get(symbol), lite=True)
+                if cand is None:
+                    return symbol, None, None
+                mcap_b = await _market_cap_billions(provider, symbol)
+                # fail open: only drop when we KNOW it's below the floor
+                if mcap_b is not None and min_cap and mcap_b < min_cap:
+                    return symbol, None, mcap_b
+                return symbol, cand, mcap_b
             except Exception:  # noqa
-                return symbol, None
+                return symbol, None, None
 
         tasks = [asyncio.create_task(_one(sym)) for sym in batch]
         pairs = []
@@ -132,7 +162,7 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
             if not t.done():
                 t.cancel()
 
-        for symbol, cand in pairs:
+        for symbol, cand, mcap_b in pairs:
             if cand is None:
                 continue
             fetched += 1
@@ -167,7 +197,8 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                       "catalyst": cand.catalyst, "as_of_epoch": now,
                       "estimated_reversal_pct": est["estimated_reversal_pct"],
                       "reversal_tier": est["tier"], "reversal_confidence": est["confidence"],
-                      "option_aim": est["option_aim"], "spark": cand.spark})
+                      "option_aim": est["option_aim"], "spark": cand.spark,
+                      "market_cap_billions": round(mcap_b, 1) if mcap_b else None})
             _CACHE[symbol] = {"fetched_at": now, "d": d}
         db.commit()
     finally:

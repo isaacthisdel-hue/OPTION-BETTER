@@ -71,7 +71,7 @@ export function CandidateCard({ c }: { c: Candidate }) {
       <div className="top">
         <div>
           <div className="sym">{c.symbol}</div>
-          <div className="cat">{c.catalyst || "no catalyst"}</div>
+          <div className="cat">{c.catalyst || "no catalyst"}{c.market_cap_billions != null ? ` · $${c.market_cap_billions}B` : ""}</div>
           <div className={`statusbadge ${c.status}`}>{c.status}</div>
         </div>
         <div style={{ textAlign: "right" }}>
