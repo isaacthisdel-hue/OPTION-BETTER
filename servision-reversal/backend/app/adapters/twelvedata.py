@@ -41,7 +41,7 @@ class TwelveDataProvider(MarketDataProvider):
 
     def __init__(self, api_key: str):
         self._key = api_key
-        self._client = httpx.AsyncClient(timeout=25.0)
+        self._client = httpx.AsyncClient(timeout=12.0)
         self._cache: dict[str, list[dict]] = {}
 
     async def aclose(self) -> None:
@@ -53,6 +53,8 @@ class TwelveDataProvider(MarketDataProvider):
         r = await self._client.get(f"{BASE}/time_series", params={
             "symbol": symbol, "interval": "1min", "outputsize": 1560,
             "timezone": "America/New_York", "apikey": self._key})
+        if r.status_code == 429:
+            raise RateLimited("429 too many requests")
         r.raise_for_status()
         d = r.json()
         if isinstance(d, dict) and d.get("status") == "error":
@@ -71,14 +73,14 @@ class TwelveDataProvider(MarketDataProvider):
     async def intraday_bars(self, symbol, resolution, start_epoch, end_epoch):
         try:
             bars = await self._bars(symbol)
-        except TwelveDataError:
+        except Exception:
             return []
         return [b for b in bars if start_epoch <= b["t"] <= end_epoch]
 
     async def daily_bars(self, symbol, days):
         try:
             bars = await self._bars(symbol)
-        except TwelveDataError:
+        except Exception:
             return []
         by_day: dict[dt.date, list[dict]] = {}
         for b in bars:
@@ -94,7 +96,7 @@ class TwelveDataProvider(MarketDataProvider):
     async def quote(self, symbol):
         try:
             bars = await self._bars(symbol)
-        except TwelveDataError:
+        except Exception:
             return None
         if not bars:
             return None

@@ -1,15 +1,13 @@
 """Live scanner service.
 
-For each symbol in the universe: pull data from the provider, compute indicators,
-build a Candidate, score it, and persist an Observation. Qualified scores spawn a
-paper setup. Everything the scanner used is stored so history is reproducible.
-
-Free-tier reality: we can't scan the whole market on 60 calls/min, so the
-universe is either an explicit WATCHLIST or today's earnings names, capped at
-MAX_UNIVERSE_SIZE.
+Bounded + concurrent: every symbol is fetched in parallel under a hard time
+budget, so the scan always returns quickly even when the data provider throttles
+us (free tiers rate-limit heavily). Whatever finished in the budget is scored;
+the rest are skipped this pass. No single scan can hang the request.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import time
 
@@ -34,7 +32,7 @@ def _et_minute_of_day(epoch: int, tz: str) -> int:
 
 async def build_candidate(
     provider: MarketDataProvider, symbol: str, cfg: StrategyConfig,
-    now_epoch: int, tz: str, catalyst: str | None,
+    now_epoch: int, tz: str, catalyst: str | None, lite: bool = False,
 ) -> Candidate | None:
     quote = await provider.quote(symbol)
     if not quote or not quote.get("price") or not quote.get("prev_close"):
@@ -44,7 +42,6 @@ async def build_candidate(
     prev_close = quote["prev_close"]
     move = ind.move_pct(price, prev_close)
 
-    # intraday bars for the session so far
     session_start = now_epoch - 8 * 3600
     bars = await provider.intraday_bars(symbol, "1", session_start, now_epoch)
 
@@ -54,7 +51,6 @@ async def build_candidate(
     higher_low = ind.has_higher_low(bars, now_epoch) if bars else None
     reclaim = ind.reclaimed_vwap(bars, now_epoch) if bars else None
 
-    # daily bars for average volume
     daily = await provider.daily_bars(symbol, 30)
     avg_vol = None
     if daily:
@@ -63,9 +59,12 @@ async def build_candidate(
     today_vol = sum(b["v"] for b in bars) if bars else None
     vol_ratio = ind.volume_ratio(today_vol, avg_vol) if (today_vol and avg_vol) else None
 
-    # fundamentals + surprise (cached upstream ideally; scarce on free tier)
-    surprise = await provider.earnings_surprise(symbol) if catalyst == "earnings" else None
-    funda = await provider.fundamentals(symbol)
+    # Fundamentals/surprise are extra API calls; skip in 'lite' (live) scans for speed.
+    surprise = None
+    funda = {}
+    if not lite:
+        surprise = await provider.earnings_surprise(symbol) if catalyst == "earnings" else None
+        funda = await provider.fundamentals(symbol) or {}
 
     spark = None
     if bars:
@@ -73,48 +72,54 @@ async def build_candidate(
         spark = [round(b["c"], 2) for b in bars[::step]]
 
     return Candidate(
-        symbol=symbol,
-        as_of_epoch=now_epoch,
-        catalyst=catalyst,
-        move_pct=move,
-        volume_ratio=vol_ratio,
-        vwap_distance_pct=vwap_dist,
-        minutes_since_new_low=mins_since_low,
-        higher_low=higher_low,
-        vwap_reclaim=reclaim,
+        symbol=symbol, as_of_epoch=now_epoch, catalyst=catalyst,
+        move_pct=move, volume_ratio=vol_ratio, vwap_distance_pct=vwap_dist,
+        minutes_since_new_low=mins_since_low, higher_low=higher_low, vwap_reclaim=reclaim,
         eps_surprise_pct=(surprise or {}).get("eps_surprise_pct"),
         revenue_surprise_pct=(surprise or {}).get("revenue_surprise_pct"),
-        pe=(funda or {}).get("pe"),
-        forward_pe=(funda or {}).get("forward_pe"),
+        pe=(funda or {}).get("pe"), forward_pe=(funda or {}).get("forward_pe"),
         price_to_sales=(funda or {}).get("price_to_sales"),
         market_cap=(funda or {}).get("market_cap"),
-        price=price,
-        spark=spark,
+        price=price, spark=spark,
     )
 
 
 async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                     reversal_model: dict | None = None) -> list[dict]:
-    """Run one scan pass over the universe. Returns scored dicts for the API/SSE."""
+    """One bounded, concurrent scan pass. Returns scored dicts (best first)."""
     settings = get_settings()
     provider = get_provider()
     now = int(time.time())
     et_min = _et_minute_of_day(now, settings.market_tz)
 
     universe, catalysts = await _resolve_universe(provider, settings)
+    budget = getattr(settings, "scan_time_budget_sec", 25)
     results: list[dict] = []
 
     try:
-        for symbol in universe:
-            cand = await build_candidate(
-                provider, symbol, cfg, now, settings.market_tz,
-                catalysts.get(symbol),
-            )
+        async def _one(symbol: str):
+            try:
+                return symbol, await build_candidate(
+                    provider, symbol, cfg, now, settings.market_tz,
+                    catalysts.get(symbol), lite=True)
+            except Exception:  # noqa
+                return symbol, None
+
+        tasks = [asyncio.create_task(_one(sym)) for sym in universe]
+        pairs = []
+        try:
+            for fut in asyncio.as_completed(tasks, timeout=budget):
+                pairs.append(await fut)
+        except asyncio.TimeoutError:
+            pass
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+
+        for symbol, cand in pairs:
             if cand is None:
                 continue
-
             score = score_candidate(cand, cfg)
-
             obs = Observation(
                 symbol=symbol, as_of_epoch=now, strategy_version_id=strat_version_id,
                 price=cand.price, move_pct=cand.move_pct, volume_ratio=cand.volume_ratio,
@@ -127,7 +132,6 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
             )
             db.add(obs)
 
-            # Qualified + within the entry window -> hypothetical paper setup.
             in_window = cfg.earliest_entry_min <= et_min <= cfg.observation_end_min
             if score.status == "QUALIFIED" and in_window and cand.price:
                 setup = build_equity_setup(symbol, cand.price, now, score.total, cfg)
@@ -148,10 +152,8 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                       "higher_low": cand.higher_low, "vwap_reclaim": cand.vwap_reclaim,
                       "catalyst": cand.catalyst,
                       "estimated_reversal_pct": est["estimated_reversal_pct"],
-                      "reversal_tier": est["tier"],
-                      "reversal_confidence": est["confidence"],
-                      "option_aim": est["option_aim"],
-                      "spark": cand.spark})
+                      "reversal_tier": est["tier"], "reversal_confidence": est["confidence"],
+                      "option_aim": est["option_aim"], "spark": cand.spark})
             results.append(d)
 
         db.commit()
