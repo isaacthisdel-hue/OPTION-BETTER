@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     finnhub_api_key: str = Field(default="", alias="FINNHUB_API_KEY")
     fmp_api_key: str = Field(default="", alias="FMP_API_KEY")
     massive_api_key: str = Field(default="", alias="MASSIVE_API_KEY")
+    alphavantage_api_key: str = Field(default="", alias="ALPHAVANTAGE_API_KEY")
+
+    # --- Backtest (real data via Alpha Vantage) ---
+    backtest_tickers: str = Field(default="NBIS,SNOW,CRWD,MDB,PLTR", alias="BACKTEST_TICKERS")
+    backtest_max_tickers: int = Field(default=5, alias="BACKTEST_MAX_TICKERS")
+    backtest_lookback_days: int = Field(default=7, alias="BACKTEST_LOOKBACK_DAYS")
 
     # --- Scanner behaviour ---
     scan_interval_seconds: int = Field(default=60, alias="SCAN_INTERVAL_SECONDS")

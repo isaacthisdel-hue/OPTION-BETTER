@@ -283,3 +283,48 @@ table.data tr:hover td { background: var(--panel-2); }
 .notice-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .notice-head .mono { color: var(--amber); font-weight: 600; letter-spacing: 0.08em; font-size: 12px; }
 .notice p { color: var(--ink-dim); font-size: 13px; margin: 0 0 14px; max-width: 62ch; line-height: 1.55; }
+
+/* ---------- backtest: meta strip ---------- */
+.cyan { color: var(--cyan); }
+.metastrip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 6px; font-size: 12px; color: var(--ink-dim);
+}
+.metastrip .mono { color: var(--cyan); letter-spacing: 0.06em; }
+.metastrip .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tickerchip {
+  font-family: var(--mono); font-size: 11px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px;
+}
+
+/* ---------- backtest: reversal tier cards ---------- */
+.tiercard { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.tiercard-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.tier-label { font-size: 12px; font-weight: 600; color: var(--ink); }
+.conf { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; padding: 3px 7px; border-radius: 4px; }
+.conf.low { background: rgba(229,105,95,0.14); color: var(--coral); border: 1px solid rgba(229,105,95,0.35); }
+.conf.medium { background: rgba(229,168,75,0.14); color: var(--amber); border: 1px solid rgba(229,168,75,0.35); }
+.conf.high { background: rgba(56,214,196,0.14); color: var(--cyan); border: 1px solid rgba(56,214,196,0.4); }
+.tier-expected { font-size: 13px; color: var(--ink-dim); }
+.tier-expected b { font-family: var(--mono); font-size: 22px; display: block; margin-top: 2px; }
+.distline { display: flex; justify-content: space-between; font-size: 11px; margin: 8px 0 12px; }
+.aim { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+.aim-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 4px; }
+.aim-row b { font-family: var(--mono); }
+.aim-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; color: var(--ink-faint); margin-top: 4px; }
+.tier-foot { font-size: 11px; color: var(--ink-faint); margin-top: 10px; }
+
+/* ---------- backtest: per-stock drilldown ---------- */
+.drill { display: grid; grid-template-columns: 240px 1fr; gap: 14px; }
+.drill-list { display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
+.drill-item {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+  text-align: left; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 9px 11px; cursor: pointer; color: var(--ink-dim);
+  font-size: 12px; font-family: inherit;
+}
+.drill-item:hover { border-color: var(--cyan); }
+.drill-item.active { border-color: var(--cyan); background: var(--panel-2); color: var(--ink); }
+.drill-chart { min-height: 340px; }
+@media (max-width: 900px) { .drill { grid-template-columns: 1fr; } }

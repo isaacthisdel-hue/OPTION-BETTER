@@ -3,30 +3,19 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Ribbon } from "@/components/Ribbon";
 
-type Metrics = {
-  trades: number;
-  insufficient_sample?: boolean;
-  win_rate?: number;
-  avg_return?: number;
-  median_return?: number;
-  avg_winner?: number;
-  avg_loser?: number;
-  profit_factor?: number | null;
-  max_drawdown?: number;
-  sharpe_like?: number;
-  expected_value?: number;
-};
-
 export default function Backtest() {
   const [res, setRes] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [sel, setSel] = useState(0);
 
   async function run() {
     setLoading(true);
     setErr(null);
     try {
-      setRes(await api.backtest({ label: "manual" }));
+      const r = await api.backtest({ label: "manual" });
+      setRes(r);
+      setSel(0);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -34,13 +23,15 @@ export default function Backtest() {
     }
   }
 
-  const s: Metrics | undefined = res?.strategy;
+  const s = res?.strategy;
+  const rm = res?.reversal_model;
+  const per: any[] = res?.per_stock || [];
 
   return (
     <>
       <div className="pagehead">
         <div>
-          <div className="eyebrow">Historical replay</div>
+          <div className="eyebrow">Historical replay · real data</div>
           <h1>Backtest</h1>
         </div>
         <button className="btn primary" onClick={run} disabled={loading}>
@@ -48,66 +39,235 @@ export default function Backtest() {
         </button>
       </div>
       <p className="pagesub">
-        Replays the same scoring code over historical events with no look-ahead:
-        indicators only see past bars, fundamentals only after they were public,
-        outcomes only from later bars. Controls show whether the rules beat naive baselines.
+        Replays the same scoring code over real recent intraday sessions with no
+        look-ahead, then learns how big a reversal each kind of drop actually produced.
       </p>
-      <Ribbon text="Ships with a synthetic sample so the pipeline runs immediately. Wire in a real historical loader before trusting any number here." />
+      <Ribbon text="Research only. Reversal tiers are measured from real outcomes, not predictions. Options aims are next-Friday research signals — never orders." />
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
 
+      {res && res.available === false && (
+        <div className="notice closed">
+          <div className="notice-head">
+            <span className="mono">REAL DATA NOT CONNECTED</span>
+          </div>
+          <p>{res.error}</p>
+          {res.how && <p className="mono" style={{ fontSize: 12, color: "var(--cyan)" }}>{res.how}</p>}
+        </div>
+      )}
+
+      {res?.meta && (
+        <div className="metastrip">
+          <span className="mono">SOURCE {String(res.meta.source).toUpperCase()}</span>
+          <span>{res.meta.events} events</span>
+          <span className="chips">
+            {(res.meta.used || []).map((u: any, i: number) => (
+              <span key={i} className="tickerchip">
+                {u.symbol} <span className="neg">{u.gap_pct}%</span> <span className="faint">{u.date}</span>
+              </span>
+            ))}
+          </span>
+          {(res.meta.skipped || []).length > 0 && (
+            <span className="faint" style={{ fontSize: 11 }}>
+              skipped: {res.meta.skipped.map((x: any) => x.symbol).join(", ")}
+            </span>
+          )}
+        </div>
+      )}
+
+      {rm && rm.tiers && (
+        <>
+          <div className="section-title">Learned reversal tiers → next-Friday options aim</div>
+          <p className="dim" style={{ fontSize: 12, margin: "-4px 0 12px", maxWidth: "70ch" }}>
+            {rm.method} Expiry basis: <b>{rm.expiry_next_friday}</b>.
+            {rm.insufficient_sample && " Sample is small — treat as directional, not proof."}
+          </p>
+          <div className="grid cols-3">
+            {rm.tiers.map((t: any, i: number) => (
+              <TierCard key={i} t={t} />
+            ))}
+            {rm.tiers.length === 0 && (
+              <div className="empty" style={{ gridColumn: "1 / -1" }}>
+                No qualifying gap-down events in the loaded window yet.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {res?.equity_curve && res.equity_curve.length > 1 && (
+        <>
+          <div className="section-title">Equity curve (compounded, qualified trades)</div>
+          <div className="panel">
+            <EquityCurve pts={res.equity_curve.map((p: any) => p.equity)} />
+          </div>
+        </>
+      )}
+
       {s && (
         <>
-          {s.insufficient_sample && (
-            <div className="ribbon" style={{ borderColor: "rgba(229,105,95,0.4)", color: "var(--coral)", background: "rgba(229,105,95,0.08)" }}>
-              <span className="mono" style={{ color: "var(--coral)" }}>SMALL SAMPLE</span>
-              <span>Only {s.trades} trades. Metrics are noise at this size — don&apos;t conclude anything yet.</span>
-            </div>
-          )}
-
-          <div className="section-title">Strategy</div>
+          <div className="section-title">Strategy metrics</div>
           <div className="grid cols-4">
-            <Tile label="Trades" value={`${s.trades}`} />
+            <Tile label="Qualified trades" value={`${s.trades}`} />
             <Tile label="Win rate" value={s.win_rate != null ? `${s.win_rate}%` : "—"} />
             <Tile label="Avg return" value={fmtPct(s.avg_return)} tone={sign(s.avg_return)} />
             <Tile label="Expectancy" value={fmtPct(s.expected_value)} tone={sign(s.expected_value)} />
+            <Tile label="Profit factor" value={s.profit_factor != null ? s.profit_factor.toFixed(2) : "n/a"} />
+            <Tile label="Max drawdown" value={fmtPct(s.max_drawdown)} tone="neg" />
             <Tile label="Avg winner" value={fmtPct(s.avg_winner)} tone="pos" />
             <Tile label="Avg loser" value={fmtPct(s.avg_loser)} tone="neg" />
-            <Tile label="Profit factor" value={s.profit_factor != null ? s.profit_factor.toFixed(2) : "∞ / n/a"} />
-            <Tile label="Max drawdown" value={fmtPct(s.max_drawdown)} tone="neg" />
           </div>
+        </>
+      )}
 
+      {per.length > 0 && (
+        <>
+          <div className="section-title">Per-stock replay</div>
+          <div className="drill">
+            <div className="drill-list">
+              {per.map((p, i) => (
+                <button
+                  key={i}
+                  className={`drill-item ${i === sel ? "active" : ""}`}
+                  onClick={() => setSel(i)}
+                >
+                  <span className="mono">{p.symbol}</span>
+                  <span className="faint">{p.date}</span>
+                  <span className="neg">{p.gap_pct}%</span>
+                  {p.qualified ? (
+                    <span className={`mono ${sign(p.return_pct)}`}>{fmtPct(p.return_pct)}</span>
+                  ) : (
+                    <span className="faint" style={{ fontSize: 10 }}>no entry</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="drill-chart panel">
+              {per[sel] && <IntradayChart p={per[sel]} />}
+            </div>
+          </div>
+        </>
+      )}
+
+      {s && (
+        <>
           <div className="section-title">Controls (baselines to beat)</div>
           <div className="grid cols-2">
             <ControlPanel name="Buy the dip (no confirmation)" m={res.controls.buy_the_dip} />
             <ControlPanel name="VWAP reclaim only (no fundamentals)" m={res.controls.vwap_only} />
           </div>
-
-          <div className="section-title">Breakdowns</div>
-          <div className="grid cols-2">
-            {Object.entries(res.breakdowns).map(([k, v]) => (
-              <BreakdownPanel key={k} title={k.replace(/_/g, " ")} buckets={v as Record<string, Metrics>} />
-            ))}
-          </div>
         </>
       )}
 
-      {!s && !err && <div className="empty">Run a backtest to see strategy metrics, controls, and per-bucket breakdowns.</div>}
+      {!res && !err && (
+        <div className="empty">Run a backtest to pull real recent sessions and measure reversal tiers.</div>
+      )}
     </>
   );
 }
 
-function Tile({ label, value, tone, foot }: { label: string; value: string; tone?: string; foot?: string }) {
+function TierCard({ t }: { t: any }) {
+  const aim = t.option_aim || {};
   return (
-    <div className="tile">
-      <div className="label">{label}</div>
-      <div className={`value ${tone || ""}`}>{value}</div>
-      {foot && <div className="foot">{foot}</div>}
+    <div className="tiercard">
+      <div className="tiercard-head">
+        <span className="tier-label">{t.tier}</span>
+        <span className={`conf ${t.confidence}`}>{String(t.confidence).toUpperCase()} · n={t.n}</span>
+      </div>
+      <div className="tier-expected">
+        Median reversal by close <b className={sign(t.median_reversion_pct)}>{fmtPct(t.median_reversion_pct)}</b>
+      </div>
+      <div className="distline">
+        <span className="faint">p25 {fmtPct(t.p25_reversion_pct)}</span>
+        <span className="faint">p75 {fmtPct(t.p75_reversion_pct)}</span>
+      </div>
+      <div className="aim">
+        <div className="aim-row">
+          <span className="mono cyan">{aim.direction}</span>
+          <span className="faint">exp {aim.expiry_next_friday}</span>
+        </div>
+        <div className="aim-row">
+          <span>aim <b className="pos">{fmtPct(aim.expected_move_pct)}</b></span>
+          <span className="faint">stretch {fmtPct(aim.stretch_move_pct)}</span>
+        </div>
+        <div className="aim-label">{aim.label}</div>
+      </div>
+      <div className="tier-foot">Positive by close {t.positive_rate_pct}% · from {t.n} real event{t.n === 1 ? "" : "s"}</div>
     </div>
   );
 }
 
-function ControlPanel({ name, m }: { name: string; m: Metrics }) {
+function EquityCurve({ pts }: { pts: number[] }) {
+  const w = 900, h = 160, pad = 8;
+  if (!pts.length) return null;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const rng = max - min || 1;
+  const x = (i: number) => pad + (i / (pts.length - 1 || 1)) * (w - 2 * pad);
+  const y = (v: number) => h - pad - ((v - min) / rng) * (h - 2 * pad);
+  const d = pts.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  const up = pts[pts.length - 1] >= pts[0];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" preserveAspectRatio="none" style={{ display: "block" }}>
+      <line x1={pad} y1={y(1)} x2={w - pad} y2={y(1)} stroke="var(--line)" strokeDasharray="3 3" />
+      <path d={d} fill="none" stroke={up ? "var(--cyan)" : "var(--coral)"} strokeWidth="2" />
+    </svg>
+  );
+}
+
+function IntradayChart({ p }: { p: any }) {
+  const w = 900, h = 300, pad = 30;
+  const series: { t: number; c: number }[] = p.series || [];
+  if (series.length < 2) return <div className="dim">No intraday data.</div>;
+  const cs = series.map((b) => b.c);
+  const lines = [p.prev_close, p.entry_price, p.stop_price, p.target1, p.target2].filter((v) => v != null);
+  const min = Math.min(...cs, ...lines), max = Math.max(...cs, ...lines);
+  const rng = max - min || 1;
+  const x = (i: number) => pad + (i / (series.length - 1)) * (w - 2 * pad);
+  const y = (v: number) => h - pad - ((v - min) / rng) * (h - 2 * pad);
+  const d = series.map((b, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(b.c).toFixed(1)}`).join(" ");
+  const HLine = ({ v, color, label }: { v?: number; color: string; label: string }) =>
+    v == null ? null : (
+      <g>
+        <line x1={pad} y1={y(v)} x2={w - pad} y2={y(v)} stroke={color} strokeDasharray="4 3" opacity="0.8" />
+        <text x={w - pad + 2} y={y(v) + 3} fontSize="10" fill={color} fontFamily="var(--mono)">{label} {v}</text>
+      </g>
+    );
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <span className="mono" style={{ fontSize: 15 }}>{p.symbol}</span>
+        <span className="faint">{p.date} · gap <span className="neg">{p.gap_pct}%</span>{p.qualified && p.score != null ? ` · score ${p.score}` : ""}</span>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: "block" }}>
+        <path d={d} fill="none" stroke="var(--ink)" strokeWidth="1.5" />
+        <HLine v={p.prev_close} color="var(--ink-faint)" label="prev" />
+        <HLine v={p.entry_price} color="var(--cyan)" label="entry" />
+        <HLine v={p.stop_price} color="var(--coral)" label="stop" />
+        <HLine v={p.target1} color="var(--amber)" label="t1" />
+        <HLine v={p.target2} color="var(--amber)" label="t2" />
+      </svg>
+      {p.qualified ? (
+        <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>
+          Entered {p.entry_price} → exit {p.exit_price} ({p.exit_reason}) ·{" "}
+          <span className={sign(p.return_pct)}>{fmtPct(p.return_pct)}</span>
+        </div>
+      ) : (
+        <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>Never reached the QUALIFIED gate — no paper entry.</div>
+      )}
+    </div>
+  );
+}
+
+function Tile({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="tile">
+      <div className="label">{label}</div>
+      <div className={`value ${tone || ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function ControlPanel({ name, m }: { name: string; m: any }) {
   return (
     <div className="panel">
       <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>{name}</div>
@@ -116,36 +276,6 @@ function ControlPanel({ name, m }: { name: string; m: Metrics }) {
         <Tile label="Win rate" value={m.win_rate != null ? `${m.win_rate}%` : "—"} />
         <Tile label="Avg ret" value={fmtPct(m.avg_return)} tone={sign(m.avg_return)} />
       </div>
-    </div>
-  );
-}
-
-function BreakdownPanel({ title, buckets }: { title: string; buckets: Record<string, Metrics> }) {
-  return (
-    <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
-      <div className="dim" style={{ fontSize: 12, padding: "12px 14px", borderBottom: "1px solid var(--line)" }}>
-        {title}
-      </div>
-      <table className="data">
-        <thead>
-          <tr>
-            <th>Bucket</th>
-            <th>Trades</th>
-            <th>Win %</th>
-            <th>Avg ret</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(buckets).map(([b, m]) => (
-            <tr key={b}>
-              <td>{b}</td>
-              <td>{m.trades}</td>
-              <td>{m.win_rate != null ? `${m.win_rate}%` : "—"}</td>
-              <td className={sign(m.avg_return)}>{fmtPct(m.avg_return)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

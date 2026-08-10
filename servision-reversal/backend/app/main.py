@@ -144,20 +144,45 @@ def create_version(payload: dict, db: Session = Depends(get_db)):
 
 @app.post("/api/backtest")
 def backtest(payload: dict, db: Session = Depends(get_db)):
-    """Run a backtest. If no events are provided, uses the synthetic sample set
-    from backtesting.sample so you can see the pipeline work before wiring real
-    historical data. Real events should be supplied by a data-loading job."""
-    from .backtesting.engine import run_backtest, HistoricalEvent
-    from .backtesting.sample import synthetic_events
+    """Run a backtest on REAL recent intraday data (Alpha Vantage). Needs a free
+    ALPHAVANTAGE_API_KEY set in the environment. No synthetic fallback."""
+    from .backtesting.engine import run_backtest
+    from .backtesting.loader import load_recent_events, LoaderError
+    from .backtesting.reversal_model import (
+        build_reversal_model, equity_curve, per_stock_series,
+    )
+    from .core.config import get_settings
 
+    settings = get_settings()
     sv = _active_version(db)
     cfg = StrategyConfig.from_dict(sv.config_json)
 
-    events = synthetic_events()  # replace with real loader when data plan is added
+    if not settings.alphavantage_api_key:
+        return {
+            "available": False,
+            "error": "No real-data key set. Add a free ALPHAVANTAGE_API_KEY to backtest on real market data.",
+            "how": "alphavantage.co (free key, ~20s) -> Railway API service -> Variables -> ALPHAVANTAGE_API_KEY -> redeploy.",
+        }
+
+    try:
+        events, meta = load_recent_events(settings)
+    except LoaderError as e:
+        return {"available": False, "error": str(e)}
+
+    if not events:
+        return {"available": False,
+                "error": "No events loaded (provider returned nothing or rate-limited). Wait a minute and retry.",
+                "meta": meta}
+
     result = run_backtest(events, cfg)
+    result["available"] = True
+    result["meta"] = meta
+    result["reversal_model"] = build_reversal_model(events, cfg)
+    result["equity_curve"] = equity_curve(result.get("trades", []))
+    result["per_stock"] = per_stock_series(events, result.get("trades", []), cfg)
 
     bt = Backtest(strategy_version_id=sv.id, params_json=payload or {},
-                  results_json=result["strategy"], label=payload.get("label", "sample"))
+                  results_json=result["strategy"], label=(payload or {}).get("label", "real"))
     db.add(bt)
     db.commit()
     return result
