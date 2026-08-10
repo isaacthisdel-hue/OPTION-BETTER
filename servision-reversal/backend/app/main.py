@@ -170,9 +170,18 @@ def backtest(payload: dict, db: Session = Depends(get_db)):
         return {"available": False, "error": str(e)}
 
     if not events:
-        return {"available": False,
-                "error": "No events loaded (provider returned nothing or rate-limited). Wait a minute and retry.",
-                "meta": meta}
+        reqn = len(meta.get("tickers_requested") or [1])
+        rl = meta.get("rate_limited", 0)
+        if rl and rl >= reqn:
+            msg = ("Alpha Vantage rate limit reached (free tier: 25 requests/day, 5/min). "
+                   "Wait a minute - or until tomorrow if you've used 25 today - then retry.")
+        elif rl:
+            msg = ("Some tickers were rate-limited by Alpha Vantage (free: 25/day, 5/min). Wait a minute and retry.")
+        else:
+            msg = ("Loaded data but found no usable sessions for: "
+                   + ", ".join(meta.get("tickers_requested", []))
+                   + ". Try different BACKTEST_TICKERS on Railway.")
+        return {"available": False, "error": msg, "meta": meta}
 
     result = run_backtest(events, cfg)
     result["available"] = True

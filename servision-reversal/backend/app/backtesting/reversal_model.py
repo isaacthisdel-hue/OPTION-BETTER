@@ -38,17 +38,28 @@ def _event_outcome(ev: HistoricalEvent, cfg: StrategyConfig) -> dict | None:
     max_high = max(b["h"] for b in later)
     reversion_pct = (close - entry) / entry * 100.0
     max_favorable_pct = (max_high - entry) / entry * 100.0
-    gap_pct = ind.move_pct(ev.session_bars[0]["o"], ev.prev_close)
-    return {"symbol": ev.symbol, "gap_pct": gap_pct, "entry": entry,
+    session_low = min(b["l"] for b in ev.session_bars)
+    drop_pct = (session_low - ev.prev_close) / ev.prev_close * 100.0
+    return {"symbol": ev.symbol, "drop_pct": round(drop_pct, 2), "entry": entry,
             "reversion_pct": reversion_pct, "max_favorable_pct": max_favorable_pct}
 
 
-def _tier(gap_pct: float) -> str:
-    if gap_pct <= -12:
-        return "Severe drop (<= -12%)"
-    if gap_pct <= -9:
-        return "Large drop (-12% to -9%)"
-    return "Moderate drop (-9% to -7%)"
+_TIER_ORDER = [
+    "Severe drop (<= -15%)",
+    "Large drop (-15% to -10%)",
+    "Moderate drop (-10% to -6%)",
+    "Mild drop (> -6%)",
+]
+
+
+def _tier(drop_pct: float) -> str:
+    if drop_pct <= -15:
+        return _TIER_ORDER[0]
+    if drop_pct <= -10:
+        return _TIER_ORDER[1]
+    if drop_pct <= -6:
+        return _TIER_ORDER[2]
+    return _TIER_ORDER[3]
 
 
 def _confidence(n: int) -> str:
@@ -60,10 +71,10 @@ def build_reversal_model(events: list[HistoricalEvent], cfg: StrategyConfig) -> 
     friday = _next_friday()
     buckets: dict[str, list[dict]] = {}
     for o in outcomes:
-        buckets.setdefault(_tier(o["gap_pct"]), []).append(o)
+        buckets.setdefault(_tier(o["drop_pct"]), []).append(o)
 
     tiers = []
-    for label in ["Severe drop (<= -12%)", "Large drop (-12% to -9%)", "Moderate drop (-9% to -7%)"]:
+    for label in _TIER_ORDER:
         rows = buckets.get(label, [])
         n = len(rows)
         if n == 0:

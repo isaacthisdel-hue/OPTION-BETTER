@@ -56,6 +56,22 @@ export default function Backtest() {
         </div>
       )}
 
+      {res && res.available === false && res.meta && (
+        <div className="panel" style={{ marginBottom: 22 }}>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>Loader diagnostics</div>
+          <div className="faint" style={{ fontSize: 12, lineHeight: 1.8 }}>
+            {(res.meta.per_ticker || []).map((t: any, i: number) => (
+              <div key={i}>
+                {t.symbol}: worst drop {t.worst_drawdown_pct}% over {t.sessions_scanned} sessions · {t.events_added} event(s)
+              </div>
+            ))}
+            {(res.meta.skipped || []).map((t: any, i: number) => (
+              <div key={"s" + i}>{t.symbol}: skipped — {t.reason}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {res?.meta && (
         <div className="metastrip">
           <span className="mono">SOURCE {String(res.meta.source).toUpperCase()}</span>
