@@ -55,7 +55,7 @@ export default function Stats() {
             <div className="tile"><div className="label">Return σ</div><div className="value">{stats.return_stdev}%</div></div>
           </div>
           {stats.insufficient_sample && (
-            <div className="ribbon" style={{ marginTop: 16, borderColor: "rgba(229,105,95,0.4)", color: "var(--coral)", background: "rgba(229,105,95,0.08)" }}>
+            <div className="ribbon" style={{ marginTop: 16, borderColor: "rgba(176,85,60,0.4)", color: "var(--coral)", background: "rgba(176,85,60,0.08)" }}>
               <span className="mono" style={{ color: "var(--coral)" }}>SMALL SAMPLE</span>
               <span>Under 30 trades — treat these numbers as noise, not signal.</span>
             </div>
@@ -110,9 +110,9 @@ export default function Stats() {
               className="ribbon"
               style={{
                 marginTop: 16,
-                borderColor: proj.insufficient_sample ? "rgba(229,105,95,0.4)" : "rgba(229,168,75,0.28)",
+                borderColor: proj.insufficient_sample ? "rgba(176,85,60,0.4)" : "rgba(169,126,60,0.28)",
                 color: proj.insufficient_sample ? "var(--coral)" : "var(--amber)",
-                background: proj.insufficient_sample ? "rgba(229,105,95,0.08)" : undefined,
+                background: proj.insufficient_sample ? "rgba(176,85,60,0.08)" : undefined,
               }}
             >
               <span className="mono" style={{ color: "inherit" }}>
