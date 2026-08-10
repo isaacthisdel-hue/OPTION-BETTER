@@ -29,6 +29,7 @@ from .core.market import market_status
 from .models import AppSetting, Base, Backtest, Observation, PaperTrade, SavedIdea, StrategyVersion
 from .scanner.config import StrategyConfig
 from .scanner.service import scan_once
+from .scanner import service as scanner_service
 from .adapters import get_provider
 from .services.stats import paper_trade_stats, project_paper_revenue
 
@@ -123,7 +124,8 @@ async def scan(force: bool = False, db: Session = Depends(get_db)):
     rmodel = _get_setting(db, "reversal_model")
     _latest = await scan_once(db, cfg, sv.id, reversal_model=rmodel)
     return {"scanned": len(_latest), "candidates": _latest,
-            "market_open": ms["open"], "market_status": ms}
+            "market_open": ms["open"], "market_status": ms,
+            "scan_meta": scanner_service.LAST_SCAN_META}
 
 
 @app.get("/api/paper-trades")

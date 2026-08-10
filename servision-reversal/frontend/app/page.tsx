@@ -13,6 +13,7 @@ export default function Scanner() {
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [market, setMarket] = useState<MarketStatus | null>(null);
   const [closedNotice, setClosedNotice] = useState<MarketStatus | null>(null);
+  const [scanMeta, setScanMeta] = useState<any>(null);
 
   async function load() {
     try {
@@ -40,6 +41,7 @@ export default function Scanner() {
       } else {
         setCands(d.candidates || []);
         setLastScan(new Date().toLocaleTimeString());
+        if (d.scan_meta) setScanMeta(d.scan_meta);
       }
       if (d.market_status) setMarket(d.market_status);
     } catch (e: any) {
@@ -80,6 +82,15 @@ export default function Scanner() {
       </p>
 
       <Ribbon />
+
+      {scanMeta && (
+        <div className="metastrip" style={{ marginBottom: 18 }}>
+          <span className="mono">COVERAGE</span>
+          <span>Showing {scanMeta.showing} of {scanMeta.universe} in universe</span>
+          <span className="faint">· fetched {scanMeta.fetched_this_scan} new this scan</span>
+          <span className="faint">· free tier ~8/min — scan again to add more</span>
+        </div>
+      )}
 
       {err && (
         <div className="empty">

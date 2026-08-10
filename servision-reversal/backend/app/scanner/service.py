@@ -1,9 +1,11 @@
 """Live scanner service.
 
-Bounded + concurrent: every symbol is fetched in parallel under a hard time
-budget, so the scan always returns quickly even when the data provider throttles
-us (free tiers rate-limit heavily). Whatever finished in the budget is scored;
-the rest are skipped this pass. No single scan can hang the request.
+Free market-data tiers rate-limit hard (~8 req/min), so a single scan can only
+fetch a handful of names. To make this usable we:
+  * fetch a rotating BATCH each scan (symbols not seen recently), concurrently,
+    under a hard time budget so the request never hangs;
+  * cache each scored candidate briefly and MERGE across scans, so results
+    accumulate as you scan again instead of vanishing when a pass is thin.
 """
 from __future__ import annotations
 
@@ -23,6 +25,10 @@ from . import indicators as ind
 from .config import StrategyConfig
 from .scorer import Candidate, score_candidate
 from ..backtesting.reversal_model import estimate_reversal
+
+# symbol -> {"fetched_at": epoch, "d": enriched_result_dict}
+_CACHE: dict[str, dict] = {}
+LAST_SCAN_META: dict = {}
 
 
 def _et_minute_of_day(epoch: int, tz: str) -> int:
@@ -59,7 +65,6 @@ async def build_candidate(
     today_vol = sum(b["v"] for b in bars) if bars else None
     vol_ratio = ind.volume_ratio(today_vol, avg_vol) if (today_vol and avg_vol) else None
 
-    # Fundamentals/surprise are extra API calls; skip in 'lite' (live) scans for speed.
     surprise = None
     funda = {}
     if not lite:
@@ -86,7 +91,7 @@ async def build_candidate(
 
 async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                     reversal_model: dict | None = None) -> list[dict]:
-    """One bounded, concurrent scan pass. Returns scored dicts (best first)."""
+    global LAST_SCAN_META
     settings = get_settings()
     provider = get_provider()
     now = int(time.time())
@@ -94,8 +99,19 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
 
     universe, catalysts = await _resolve_universe(provider, settings)
     budget = getattr(settings, "scan_time_budget_sec", 25)
-    results: list[dict] = []
+    batch_size = getattr(settings, "scan_batch_size", 12)
+    refresh_sec = getattr(settings, "scan_refresh_sec", 120)
+    ttl = getattr(settings, "scan_cache_ttl_sec", 1800)
 
+    def age(sym: str) -> int:
+        e = _CACHE.get(sym)
+        return (now - e["fetched_at"]) if e else 10 ** 9
+
+    # rotate: fetch the stalest symbols first (never-seen count as oldest)
+    stale = sorted([s for s in universe if age(s) >= refresh_sec], key=age, reverse=True)
+    batch = stale[:batch_size]
+
+    fetched = 0
     try:
         async def _one(symbol: str):
             try:
@@ -105,7 +121,7 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
             except Exception:  # noqa
                 return symbol, None
 
-        tasks = [asyncio.create_task(_one(sym)) for sym in universe]
+        tasks = [asyncio.create_task(_one(sym)) for sym in batch]
         pairs = []
         try:
             for fut in asyncio.as_completed(tasks, timeout=budget):
@@ -119,8 +135,9 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
         for symbol, cand in pairs:
             if cand is None:
                 continue
+            fetched += 1
             score = score_candidate(cand, cfg)
-            obs = Observation(
+            db.add(Observation(
                 symbol=symbol, as_of_epoch=now, strategy_version_id=strat_version_id,
                 price=cand.price, move_pct=cand.move_pct, volume_ratio=cand.volume_ratio,
                 vwap_distance_pct=cand.vwap_distance_pct, higher_low=cand.higher_low,
@@ -129,9 +146,7 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                 score_total=score.total, status=score.status,
                 components_json=[c.__dict__ for c in score.components],
                 snapshot_json=cand.__dict__,
-            )
-            db.add(obs)
-
+            ))
             in_window = cfg.earliest_entry_min <= et_min <= cfg.observation_end_min
             if score.status == "QUALIFIED" and in_window and cand.price:
                 setup = build_equity_setup(symbol, cand.price, now, score.total, cfg)
@@ -143,25 +158,28 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                     entry_epoch=setup.entry_epoch, score_at_entry=score.total,
                     components_json=[c.__dict__ for c in score.components],
                 ))
-
             est = estimate_reversal(cand.move_pct, reversal_model)
             d = score.to_dict()
             d.update({"price": cand.price, "move_pct": cand.move_pct,
                       "volume_ratio": cand.volume_ratio,
                       "vwap_distance_pct": cand.vwap_distance_pct,
                       "higher_low": cand.higher_low, "vwap_reclaim": cand.vwap_reclaim,
-                      "catalyst": cand.catalyst,
+                      "catalyst": cand.catalyst, "as_of_epoch": now,
                       "estimated_reversal_pct": est["estimated_reversal_pct"],
                       "reversal_tier": est["tier"], "reversal_confidence": est["confidence"],
                       "option_aim": est["option_aim"], "spark": cand.spark})
-            results.append(d)
-
+            _CACHE[symbol] = {"fetched_at": now, "d": d}
         db.commit()
     finally:
         await provider.aclose()
 
-    results.sort(key=lambda r: r["total"], reverse=True)
-    return results
+    # merge everything still fresh + still in the universe, best first
+    merged = [_CACHE[s]["d"] for s in universe
+              if s in _CACHE and (now - _CACHE[s]["fetched_at"]) <= ttl]
+    merged.sort(key=lambda r: r["total"], reverse=True)
+    LAST_SCAN_META = {"universe": len(universe), "fetched_this_scan": fetched,
+                      "batch": len(batch), "showing": len(merged)}
+    return merged
 
 
 async def _resolve_universe(provider, settings) -> tuple[list[str], dict[str, str]]:

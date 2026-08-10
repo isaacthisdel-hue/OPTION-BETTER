@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # --- Scanner behaviour ---
     scan_interval_seconds: int = Field(default=60, alias="SCAN_INTERVAL_SECONDS")
     scan_time_budget_sec: int = Field(default=25, alias="SCAN_TIME_BUDGET_SEC")
+    scan_batch_size: int = Field(default=12, alias="SCAN_BATCH_SIZE")
+    scan_refresh_sec: int = Field(default=120, alias="SCAN_REFRESH_SEC")
+    scan_cache_ttl_sec: int = Field(default=1800, alias="SCAN_CACHE_TTL_SEC")
     # Comma-separated watchlist used on the free tier (can't scan whole market
     # on 60 calls/min). Empty means "use the earnings-calendar universe".
     watchlist: str = Field(default="", alias="WATCHLIST")
