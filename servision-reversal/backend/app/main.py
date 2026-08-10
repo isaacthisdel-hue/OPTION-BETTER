@@ -157,11 +157,11 @@ def backtest(payload: dict, db: Session = Depends(get_db)):
     sv = _active_version(db)
     cfg = StrategyConfig.from_dict(sv.config_json)
 
-    if not settings.alphavantage_api_key:
+    if not (settings.twelvedata_api_key or settings.fmp_api_key or settings.alphavantage_api_key):
         return {
             "available": False,
-            "error": "No real-data key set. Add a free ALPHAVANTAGE_API_KEY to backtest on real market data.",
-            "how": "alphavantage.co (free key, ~20s) -> Railway API service -> Variables -> ALPHAVANTAGE_API_KEY -> redeploy.",
+            "error": "No real-data key set. Add a free market-data key to backtest on real data.",
+            "how": "Recommended: twelvedata.com (free, 800/day) -> Railway Variables -> TWELVEDATA_API_KEY. FMP or Alpha Vantage keys also work.",
         }
 
     try:
