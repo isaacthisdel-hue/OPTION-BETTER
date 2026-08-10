@@ -57,7 +57,11 @@ export type Candidate = {
   estimated_reversal_pct?: number;
   reversal_tier?: string;
   reversal_confidence?: string;
-  option_aim?: { direction: string; expiry_next_friday: string; expected_move_pct: number };
+  option_aim?: { direction: string; expiry_next_friday: string; expected_move_pct?: number; target_move_pct?: number };
+  prediction?: string;
+  direction_bias?: string;
+  predicted_move_pct?: number;
+  prediction_confidence?: string;
   spark?: number[];
   market_cap_billions?: number | null;
 };

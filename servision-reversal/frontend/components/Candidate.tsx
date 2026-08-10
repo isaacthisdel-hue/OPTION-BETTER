@@ -84,15 +84,23 @@ export function CandidateCard({ c }: { c: Candidate }) {
 
       <div className="revstrip">
         <div className="revnum">
-          <div className="k">Est. reversal</div>
-          <div className="v pos">{c.estimated_reversal_pct != null ? `+${c.estimated_reversal_pct.toFixed(1)}%` : "—"}</div>
+          <div className="k">Prediction</div>
+          <div className="predrow">
+            <span className={`predbadge ${c.prediction === "REVERSAL" ? "rev" : "cont"}`}>
+              {c.prediction || "—"}
+            </span>
+            <span className={`v ${(c.predicted_move_pct ?? 0) >= 0 ? "pos" : "neg"}`}>
+              {c.predicted_move_pct != null ? `${c.predicted_move_pct >= 0 ? "+" : ""}${c.predicted_move_pct}%` : "—"}
+            </span>
+          </div>
         </div>
         <div className="revaim">
           {c.option_aim && (
             <div className="mono cyan">{c.option_aim.direction} · exp {c.option_aim.expiry_next_friday}</div>
           )}
           <div className="faint" style={{ fontSize: 11 }}>
-            {c.reversal_tier || ""}{c.reversal_confidence ? ` · ${c.reversal_confidence}` : ""}
+            {c.prediction_confidence ? `${c.prediction_confidence} confidence` : ""}
+            {c.estimated_reversal_pct != null ? ` · rev est +${c.estimated_reversal_pct}%` : ""}
           </div>
         </div>
         <Spark data={c.spark} />

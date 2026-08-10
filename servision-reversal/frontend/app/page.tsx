@@ -55,9 +55,6 @@ export default function Scanner() {
     load();
   }, []);
 
-  const qualified = cands.filter((c) => c.status === "QUALIFIED");
-  const watch = cands.filter((c) => c.status === "WATCH");
-
   return (
     <>
       <div className="pagehead">
@@ -123,22 +120,11 @@ export default function Scanner() {
         </div>
       )}
 
-      {qualified.length > 0 && (
+      {cands.length > 0 && (
         <>
-          <div className="section-title">Qualified · {qualified.length}</div>
+          <div className="section-title">Ranked · {cands.length}</div>
           <div className="grid cols-2">
-            {qualified.map((c) => (
-              <CandidateCard key={c.symbol} c={c} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {watch.length > 0 && (
-        <>
-          <div className="section-title">Watch · {watch.length}</div>
-          <div className="grid cols-2">
-            {watch.map((c) => (
+            {cands.map((c) => (
               <CandidateCard key={c.symbol} c={c} />
             ))}
           </div>

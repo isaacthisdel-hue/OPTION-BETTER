@@ -427,3 +427,9 @@ table.data tr:hover td { background: var(--panel-2); }
 .savestatus.watching { background: rgba(169,126,60,0.14); color: var(--amber); border: 1px solid rgba(169,126,60,0.35); }
 .savestatus.hit { background: rgba(95,125,79,0.14); color: var(--cyan); border: 1px solid rgba(95,125,79,0.4); }
 .savestatus.expired { background: var(--panel-2); color: var(--ink-faint); border: 1px solid var(--line); }
+
+/* ---------- prediction badge ---------- */
+.predrow { display: flex; align-items: center; gap: 8px; }
+.predbadge { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; padding: 3px 7px; border-radius: 4px; }
+.predbadge.rev { background: rgba(95,125,79,0.14); color: var(--cyan); border: 1px solid rgba(95,125,79,0.4); }
+.predbadge.cont { background: rgba(176,85,60,0.12); color: var(--coral); border: 1px solid rgba(176,85,60,0.35); }

@@ -13,6 +13,8 @@ import asyncio
 import datetime as dt
 import time
 
+import httpx
+
 import pytz
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,7 @@ from . import indicators as ind
 from .config import StrategyConfig
 from .scorer import Candidate, score_candidate
 from ..backtesting.reversal_model import estimate_reversal
+from .predict import predict_movement
 
 # symbol -> {"fetched_at": epoch, "d": enriched_result_dict}
 _CACHE: dict[str, dict] = {}
@@ -189,6 +192,7 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                     components_json=[c.__dict__ for c in score.components],
                 ))
             est = estimate_reversal(cand.move_pct, reversal_model)
+            pred = predict_movement(cand, reversal_model)
             d = score.to_dict()
             d.update({"price": cand.price, "move_pct": cand.move_pct,
                       "volume_ratio": cand.volume_ratio,
@@ -197,7 +201,13 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
                       "catalyst": cand.catalyst, "as_of_epoch": now,
                       "estimated_reversal_pct": est["estimated_reversal_pct"],
                       "reversal_tier": est["tier"], "reversal_confidence": est["confidence"],
-                      "option_aim": est["option_aim"], "spark": cand.spark,
+                      "prediction": pred["prediction"],
+                      "direction_bias": pred["direction_bias"],
+                      "predicted_move_pct": pred["predicted_move_pct"],
+                      "prediction_confidence": pred["prediction_confidence"],
+                      "reversal_score": pred["reversal_score"],
+                      "continuation_score": pred["continuation_score"],
+                      "option_aim": pred["option_aim"], "spark": cand.spark,
                       "market_cap_billions": round(mcap_b, 1) if mcap_b else None})
             _CACHE[symbol] = {"fetched_at": now, "d": d}
         db.commit()
@@ -213,10 +223,42 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
     return merged
 
 
+async def _fetch_movers(settings) -> list[str]:
+    """Today's most active + biggest gainers/losers (FMP). Best-effort."""
+    key = getattr(settings, "fmp_api_key", "")
+    if not key:
+        return []
+    endpoints = ["stock_market/actives", "stock_market/losers", "stock_market/gainers"]
+    syms: list[str] = []
+    async with httpx.AsyncClient(timeout=12.0) as c:
+        async def grab(ep):
+            try:
+                r = await c.get(f"https://financialmodelingprep.com/api/v3/{ep}",
+                                params={"apikey": key})
+                if r.status_code != 200:
+                    return []
+                d = r.json()
+                if not isinstance(d, list):
+                    return []
+                return [(x.get("symbol") or x.get("ticker")) for x in d
+                        if isinstance(x, dict) and (x.get("symbol") or x.get("ticker"))]
+            except Exception:
+                return []
+        for part in await asyncio.gather(*[grab(e) for e in endpoints]):
+            syms.extend(part)
+    # keep order, dedupe
+    return list(dict.fromkeys(syms))
+
+
 async def _resolve_universe(provider, settings) -> tuple[list[str], dict[str, str]]:
-    """Union of the watchlist and today's earnings names, deduped, capped."""
+    """Watchlist + today's most-active movers + earnings names, deduped, capped."""
     watch = list(settings.watchlist_symbols)
     catalysts = {s: "earnings" for s in watch}
+
+    movers = await _fetch_movers(settings)
+    for sym in movers:
+        catalysts.setdefault(sym, "active")
+
     cal_syms: list[str] = []
     try:
         today = dt.date.today().isoformat()
@@ -226,5 +268,6 @@ async def _resolve_universe(provider, settings) -> tuple[list[str], dict[str, st
         cal_syms = []
     for sym in cal_syms:
         catalysts.setdefault(sym, "earnings")
-    universe = list(dict.fromkeys(watch + cal_syms))[: settings.max_universe_size]
+
+    universe = list(dict.fromkeys(watch + movers + cal_syms))[: settings.max_universe_size]
     return universe, catalysts
