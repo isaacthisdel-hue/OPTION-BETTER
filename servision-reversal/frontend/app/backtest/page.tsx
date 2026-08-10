@@ -80,7 +80,6 @@ export default function Backtest() {
           <div className="section-title">Learned reversal tiers → next-Friday options aim</div>
           <p className="dim" style={{ fontSize: 12, margin: "-4px 0 12px", maxWidth: "70ch" }}>
             {rm.method} Expiry basis: <b>{rm.expiry_next_friday}</b>.
-            {rm.insufficient_sample && " Sample is small — treat as directional, not proof."}
           </p>
           <div className="grid cols-3">
             {rm.tiers.map((t: any, i: number) => (
@@ -190,7 +189,6 @@ function TierCard({ t }: { t: any }) {
           <span>aim <b className="pos">{fmtPct(aim.expected_move_pct)}</b></span>
           <span className="faint">stretch {fmtPct(aim.stretch_move_pct)}</span>
         </div>
-        <div className="aim-label">{aim.label}</div>
       </div>
       <div className="tier-foot">Positive by close {t.positive_rate_pct}% · from {t.n} real event{t.n === 1 ? "" : "s"}</div>
     </div>
@@ -252,7 +250,7 @@ function IntradayChart({ p }: { p: any }) {
           <span className={sign(p.return_pct)}>{fmtPct(p.return_pct)}</span>
         </div>
       ) : (
-        <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>Never reached the QUALIFIED gate — no paper entry.</div>
+        <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>Never reached the QUALIFIED gate — no entry.</div>
       )}
     </div>
   );

@@ -4,7 +4,7 @@ import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
   title: "Reversal Research",
-  description: "Paper-trading research tool for catalyst-driven mean reversion.",
+  description: "Catalyst-driven mean-reversion scanner.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <aside className="sidebar">
             <div className="brand">
               <div className="mark">REVERSAL·RESEARCH</div>
-              <div className="sub">paper engine · no execution</div>
+              <div className="sub">reversal signal engine</div>
             </div>
             <Nav />
           </aside>

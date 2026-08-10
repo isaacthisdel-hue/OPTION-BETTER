@@ -34,19 +34,18 @@ export default function PaperTrades() {
     <>
       <div className="pagehead">
         <div>
-          <div className="eyebrow">Simulation ledger</div>
-          <h1>Paper trades</h1>
+          <div className="eyebrow">Trade ledger</div>
+          <h1>Trades</h1>
         </div>
       </div>
       <p className="pagesub">
-        Hypothetical setups the engine recorded when a candidate qualified. These are
-        simulations for measurement — never orders, never recommendations.
+        Setups the engine recorded when a candidate qualified, tracked to their stop or targets.
       </p>
       <Ribbon text="Every row is a QUALIFIED PAPER-TRADE SETUP. Outcomes are simulated with modelled slippage and a conservative stop-first fill assumption." />
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
       {!err && trades.length === 0 && (
-        <div className="empty">No paper trades yet. They appear when a scan produces a QUALIFIED score inside the entry window.</div>
+        <div className="empty">No trades yet. They appear when a scan produces a QUALIFIED score inside the entry window.</div>
       )}
 
       {open.length > 0 && (

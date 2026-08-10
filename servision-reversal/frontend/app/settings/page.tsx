@@ -46,7 +46,7 @@ const GROUPS: Group[] = [
   },
   {
     title: "Risk & targets",
-    blurb: "Sizing for the HYPOTHETICAL paper trade. Nothing here places a real order.",
+    blurb: "Sizing for the stop and profit targets.",
     fields: [
       {
         key: "stop_pct",
@@ -82,7 +82,7 @@ const GROUPS: Group[] = [
         key: "min_score_to_qualify",
         label: "Score to reach QUALIFIED",
         suffix: "pts",
-        def: "Total points needed to become a full QUALIFIED setup (and record a paper trade). This is the strict bar. Default 80.",
+        def: "Total points needed to become a full QUALIFIED setup (and record a trade). This is the strict bar. Default 80.",
       },
     ],
   },

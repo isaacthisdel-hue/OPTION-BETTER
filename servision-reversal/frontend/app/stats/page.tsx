@@ -34,40 +34,32 @@ export default function Stats() {
         </div>
       </div>
       <p className="pagesub">
-        Aggregate performance of the paper-trade ledger, and a forward projection
-        built strictly from those tracked results.
+        Aggregate performance of the ledger, and a forward projection from those results.
       </p>
       <Ribbon />
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
 
       {stats && stats.trades === 0 && (
-        <div className="empty">No closed paper trades yet — statistics appear once trades resolve.</div>
+        <div className="empty">No closed trades yet — statistics appear once trades resolve.</div>
       )}
 
       {stats && stats.trades > 0 && (
         <>
-          <div className="section-title">Paper ledger · {stats.trades} closed</div>
+          <div className="section-title">Ledger · {stats.trades} closed</div>
           <div className="grid cols-4">
             <div className="tile"><div className="label">Win rate</div><div className="value">{stats.win_rate}%</div></div>
             <div className="tile"><div className="label">Avg return</div><div className={`value ${stats.avg_return >= 0 ? "pos" : "neg"}`}>{stats.avg_return >= 0 ? "+" : ""}{stats.avg_return}%</div></div>
             <div className="tile"><div className="label">Expectancy</div><div className={`value ${stats.expected_value >= 0 ? "pos" : "neg"}`}>{stats.expected_value >= 0 ? "+" : ""}{stats.expected_value}%</div></div>
             <div className="tile"><div className="label">Return σ</div><div className="value">{stats.return_stdev}%</div></div>
           </div>
-          {stats.insufficient_sample && (
-            <div className="ribbon" style={{ marginTop: 16, borderColor: "rgba(176,85,60,0.4)", color: "var(--coral)", background: "rgba(176,85,60,0.08)" }}>
-              <span className="mono" style={{ color: "var(--coral)" }}>SMALL SAMPLE</span>
-              <span>Under 30 trades — treat these numbers as noise, not signal.</span>
-            </div>
-          )}
         </>
       )}
 
-      <div className="section-title">Estimated paper revenue</div>
+      <div className="section-title">Estimated revenue</div>
       <div className="panel">
         <p className="dim" style={{ fontSize: 12, marginTop: 0 }}>
-          Projected from your tracked expectancy — not a from-nothing forecast, and
-          not a promise. The band widens when the sample is small.
+          Projected from your tracked expectancy over the assumptions below.
         </p>
         <div className="grid cols-3" style={{ marginBottom: 16 }}>
           <div className="field">
@@ -105,20 +97,6 @@ export default function Stats() {
                 <div className="label">High estimate</div>
                 <div className="value pos">${proj.high_estimate.toLocaleString()}</div>
               </div>
-            </div>
-            <div
-              className="ribbon"
-              style={{
-                marginTop: 16,
-                borderColor: proj.insufficient_sample ? "rgba(176,85,60,0.4)" : "rgba(169,126,60,0.28)",
-                color: proj.insufficient_sample ? "var(--coral)" : "var(--amber)",
-                background: proj.insufficient_sample ? "rgba(176,85,60,0.08)" : undefined,
-              }}
-            >
-              <span className="mono" style={{ color: "inherit" }}>
-                {proj.insufficient_sample ? "LOW CONFIDENCE" : "ASSUMPTION"}
-              </span>
-              <span>{proj.warning}</span>
             </div>
           </div>
         )}
