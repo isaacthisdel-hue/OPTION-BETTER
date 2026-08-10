@@ -232,3 +232,54 @@ table.data tr:hover td { background: var(--panel-2); }
   .brand { display: none; }
   .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
 }
+
+/* ---------- hover-definition tooltip (Settings) ---------- */
+.info { position: relative; display: inline-block; margin-left: 6px; cursor: help; }
+.info-mark {
+  position: relative; top: -1px;
+  color: var(--cyan); font-family: var(--mono); font-weight: 700; font-size: 13px;
+}
+.info-pop {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+  width: 260px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px; color: var(--ink); font-size: 12px;
+  line-height: 1.5; text-transform: none; letter-spacing: 0; font-weight: 400;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 30;
+  opacity: 0; visibility: hidden; transition: opacity 0.12s;
+}
+.info-pop::after {
+  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent; border-top-color: var(--line);
+}
+.info:hover .info-pop, .info:focus .info-pop { opacity: 1; visibility: visible; }
+
+/* ---------- input with unit suffix ---------- */
+.inputwrap { position: relative; display: flex; align-items: center; }
+.inputwrap input { width: 100%; padding-right: 40px; }
+.inputwrap .suffix {
+  position: absolute; right: 10px; font-family: var(--mono); font-size: 11px;
+  color: var(--ink-faint); pointer-events: none;
+}
+
+/* ---------- market session indicator ---------- */
+.sessiondot {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  padding: 5px 9px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--ink-dim);
+}
+.sessiondot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
+.sessiondot.open { color: var(--cyan); border-color: rgba(56,214,196,0.4); }
+.sessiondot.open .dot { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.sessiondot.closed { color: var(--amber); border-color: rgba(229,168,75,0.35); }
+.sessiondot.closed .dot { background: var(--amber); }
+
+/* ---------- market-closed notice ---------- */
+.notice {
+  border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px;
+  background: var(--panel); margin-bottom: 22px;
+}
+.notice.closed { border-color: rgba(229,168,75,0.35); background: linear-gradient(180deg, rgba(229,168,75,0.06), transparent); }
+.notice-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.notice-head .mono { color: var(--amber); font-weight: 600; letter-spacing: 0.08em; font-size: 12px; }
+.notice p { color: var(--ink-dim); font-size: 13px; margin: 0 0 14px; max-width: 62ch; line-height: 1.55; }

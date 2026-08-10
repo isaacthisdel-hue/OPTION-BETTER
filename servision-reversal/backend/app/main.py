@@ -25,6 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from .core.config import get_settings
 from .core.db import get_db, engine
+from .core.market import market_status
 from .models import Base, Backtest, Observation, PaperTrade, StrategyVersion
 from .scanner.config import StrategyConfig
 from .scanner.service import scan_once
@@ -74,13 +75,27 @@ def candidates():
     return {"candidates": _latest, "count": len(_latest)}
 
 
+@app.get("/api/market-status")
+def market_status_route():
+    return market_status()
+
+
 @app.post("/api/scan")
-async def scan(db: Session = Depends(get_db)):
+async def scan(force: bool = False, db: Session = Depends(get_db)):
+    """Run one scan pass. If the US market is closed we short-circuit with a
+    clear market_open=false payload (instead of scanning stale/empty data and
+    appearing to hang). Pass ?force=true to scan anyway (e.g. to test a
+    watchlist after hours)."""
+    ms = market_status()
+    if not ms["open"] and not force:
+        return {"scanned": 0, "candidates": [], "market_open": False,
+                "market_status": ms}
     global _latest
     sv = _active_version(db)
     cfg = StrategyConfig.from_dict(sv.config_json)
     _latest = await scan_once(db, cfg, sv.id)
-    return {"scanned": len(_latest), "candidates": _latest}
+    return {"scanned": len(_latest), "candidates": _latest,
+            "market_open": ms["open"], "market_status": ms}
 
 
 @app.get("/api/paper-trades")

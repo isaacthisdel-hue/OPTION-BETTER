@@ -3,17 +3,99 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Ribbon } from "@/components/Ribbon";
 
-const EDITABLE: [string, string][] = [
-  ["min_catalyst_move_pct", "Min catalyst move %"],
-  ["min_volume_ratio", "Min volume ratio"],
-  ["max_vwap_distance_pct", "Max VWAP distance %"],
-  ["no_new_low_minutes", "No-new-low minutes"],
-  ["stop_pct", "Stop %"],
-  ["target1_pct", "Target 1 %"],
-  ["target2_pct", "Target 2 %"],
-  ["min_score_to_watch", "Score → watch"],
-  ["min_score_to_qualify", "Score → qualify"],
+// Plain-language settings, grouped, each with a hover definition (*).
+type Field = { key: string; label: string; def: string; suffix?: string };
+type Group = { title: string; blurb: string; fields: Field[] };
+
+const GROUPS: Group[] = [
+  {
+    title: "Entry criteria",
+    blurb: "What makes a stock show up as a candidate in the first place.",
+    fields: [
+      {
+        key: "min_catalyst_move_pct",
+        label: "Minimum drop to qualify",
+        suffix: "%",
+        def: "How far a stock must have fallen from yesterday's close (a negative number) before the scanner considers it. A bigger drop means a bigger potential overreaction to bounce from. Default −7 means it must be down at least 7%.",
+      },
+      {
+        key: "min_volume_ratio",
+        label: "Minimum volume surge",
+        suffix: "×",
+        def: "Today's trading volume divided by its normal average. 2.0 means it must be trading at twice its usual volume — proof the move is real and widely traded, not thin noise.",
+      },
+      {
+        key: "max_vwap_distance_pct",
+        label: "Max stretch below VWAP",
+        suffix: "%",
+        def: "VWAP is the day's volume-weighted average price — a fair-value line. This is the furthest BELOW that line a stock can be and still count. Too far below and it may be in free-fall rather than setting up to revert.",
+      },
+    ],
+  },
+  {
+    title: "Confirmation",
+    blurb: "Signs the drop has stalled and a bounce may be starting.",
+    fields: [
+      {
+        key: "no_new_low_minutes",
+        label: "Minutes without a new low",
+        suffix: "min",
+        def: "The stock must go this many minutes without printing a fresh intraday low — a sign the selling pressure has paused. Default 15 minutes.",
+      },
+    ],
+  },
+  {
+    title: "Risk & targets",
+    blurb: "Sizing for the HYPOTHETICAL paper trade. Nothing here places a real order.",
+    fields: [
+      {
+        key: "stop_pct",
+        label: "Stop-loss",
+        suffix: "%",
+        def: "How far below the entry price the simulated trade is closed for a loss. Smaller = tighter risk but stopped out more often. Default 1.5%.",
+      },
+      {
+        key: "target1_pct",
+        label: "First target",
+        suffix: "%",
+        def: "The first profit target above entry where the simulated trade takes gains. Default 1.5%.",
+      },
+      {
+        key: "target2_pct",
+        label: "Second target",
+        suffix: "%",
+        def: "A further profit target above entry for a bigger move. Default 3%.",
+      },
+    ],
+  },
+  {
+    title: "Score gates",
+    blurb: "How the total points turn into a verdict.",
+    fields: [
+      {
+        key: "min_score_to_watch",
+        label: "Score to reach WATCH",
+        suffix: "pts",
+        def: "Total points a stock needs to appear on the WATCH list. Below this it is skipped entirely. Default 60.",
+      },
+      {
+        key: "min_score_to_qualify",
+        label: "Score to reach QUALIFIED",
+        suffix: "pts",
+        def: "Total points needed to become a full QUALIFIED setup (and record a paper trade). This is the strict bar. Default 80.",
+      },
+    ],
+  },
 ];
+
+function Info({ text }: { text: string }) {
+  return (
+    <span className="info" tabIndex={0}>
+      <span className="info-mark">*</span>
+      <span className="info-pop">{text}</span>
+    </span>
+  );
+}
 
 export default function Settings() {
   const [versions, setVersions] = useState<any[]>([]);
@@ -23,10 +105,13 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.versions().then((d) => {
-      setVersions(d.versions || []);
-      if (d.versions?.[0]) setCfg(d.versions[0].config);
-    }).catch((e) => setErr(e.message));
+    api
+      .versions()
+      .then((d) => {
+        setVersions(d.versions || []);
+        if (d.versions?.[0]) setCfg(d.versions[0].config);
+      })
+      .catch((e) => setErr(e.message));
   }, []);
 
   async function save() {
@@ -54,35 +139,60 @@ export default function Settings() {
         </div>
       </div>
       <p className="pagesub">
-        Every threshold the strategy uses. Saving creates a new immutable strategy
-        version so past observations stay tied to the rules that produced them.
+        These are the dials that define the strategy. Hover the{" "}
+        <span className="info-mark" style={{ position: "static" }}>
+          *
+        </span>{" "}
+        beside any setting for a plain-English explanation. Saving creates a new{" "}
+        <b>version</b> so past results stay tied to the exact rules that produced them.
       </p>
-      <Ribbon text="Changing thresholds does not change history. Backtest a new version before trusting it." />
+      <Ribbon text="Changing these does not rewrite history. Always backtest a new version before trusting it." />
 
       {err && <div className="empty">Backend unreachable ({err}).</div>}
 
-      <div className="section-title">Thresholds</div>
-      <div className="panel">
-        <div className="grid cols-3">
-          {EDITABLE.map(([key, lbl]) => (
-            <div className="field" key={key}>
-              <label>{lbl}</label>
-              <input
-                type="number"
-                value={cfg[key] ?? ""}
-                onChange={(e) => setCfg({ ...cfg, [key]: +e.target.value })}
-              />
+      {GROUPS.map((g) => (
+        <div key={g.title}>
+          <div className="section-title">{g.title}</div>
+          <p className="dim" style={{ fontSize: 12, margin: "-4px 0 12px" }}>{g.blurb}</p>
+          <div className="panel">
+            <div className="grid cols-3">
+              {g.fields.map((f) => (
+                <div className="field" key={f.key}>
+                  <label>
+                    {f.label}
+                    <Info text={f.def} />
+                  </label>
+                  <div className="inputwrap">
+                    <input
+                      type="number"
+                      value={cfg[f.key] ?? ""}
+                      onChange={(e) => setCfg({ ...cfg, [f.key]: +e.target.value })}
+                    />
+                    {f.suffix && <span className="suffix">{f.suffix}</span>}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginTop: 18 }}>
-          <div className="field" style={{ maxWidth: 160 }}>
-            <label>New version label</label>
-            <input value={label} onChange={(e) => setLabel(e.target.value)} />
           </div>
-          <button className="btn primary" onClick={save}>SAVE AS NEW VERSION</button>
-          {saved && <span className="pos mono" style={{ fontSize: 12 }}>saved ✓</span>}
         </div>
+      ))}
+
+      <div className="panel" style={{ marginTop: 20, display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <div className="field" style={{ maxWidth: 180 }}>
+          <label>
+            New version label
+            <Info text="A name for this set of rules, like V2 or 'tighter-stops'. Saving snapshots the current dials under this label — you can backtest and compare versions without overwriting the old one." />
+          </label>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} />
+        </div>
+        <button className="btn primary" onClick={save}>
+          SAVE AS NEW VERSION
+        </button>
+        {saved && (
+          <span className="pos mono" style={{ fontSize: 12 }}>
+            saved ✓
+          </span>
+        )}
       </div>
 
       <div className="section-title">Version history</div>
@@ -103,7 +213,9 @@ export default function Settings() {
                 <td>{v.id}</td>
                 <td style={{ fontWeight: 600 }}>{v.label}</td>
                 <td>{v.config.min_score_to_qualify}</td>
-                <td>{v.config.stop_pct}% / {v.config.target1_pct}% / {v.config.target2_pct}%</td>
+                <td>
+                  {v.config.stop_pct}% / {v.config.target1_pct}% / {v.config.target2_pct}%
+                </td>
                 <td className="dim">{v.notes}</td>
               </tr>
             ))}

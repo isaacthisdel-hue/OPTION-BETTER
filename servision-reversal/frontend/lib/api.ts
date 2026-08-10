@@ -17,7 +17,8 @@ async function post(path: string, body?: unknown) {
 
 export const api = {
   candidates: () => get("/api/candidates"),
-  scan: () => post("/api/scan"),
+  scan: (force = false) => post(`/api/scan${force ? "?force=true" : ""}`),
+  marketStatus: () => get("/api/market-status"),
   paperTrades: () => get("/api/paper-trades"),
   stats: () => get("/api/stats"),
   projection: (capital = 10000, tradesPerDay = 2, days = 5) =>
