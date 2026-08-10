@@ -110,3 +110,22 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     value_json: Mapped[dict] = mapped_column(JSON)
+
+
+class SavedIdea(Base):
+    """A candidate the user bookmarked to see if the reversal actually played out."""
+    __tablename__ = "saved_ideas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(12), index=True)
+    saved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
+                                                  server_default=func.now())
+    entry_price: Mapped[float] = mapped_column(Float)
+    score: Mapped[float | None] = mapped_column(Float)
+    estimated_reversal_pct: Mapped[float | None] = mapped_column(Float)
+    target_price: Mapped[float | None] = mapped_column(Float)
+    expiry: Mapped[str | None] = mapped_column(String(12))
+    status: Mapped[str] = mapped_column(String(12), default="watching")  # watching|hit|expired
+    best_return_pct: Mapped[float | None] = mapped_column(Float, default=0.0)
+    last_price: Mapped[float | None] = mapped_column(Float)
+    note: Mapped[str | None] = mapped_column(String(200))

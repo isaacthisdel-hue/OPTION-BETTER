@@ -26,9 +26,10 @@ from sse_starlette.sse import EventSourceResponse
 from .core.config import get_settings
 from .core.db import get_db, engine
 from .core.market import market_status
-from .models import AppSetting, Base, Backtest, Observation, PaperTrade, StrategyVersion
+from .models import AppSetting, Base, Backtest, Observation, PaperTrade, SavedIdea, StrategyVersion
 from .scanner.config import StrategyConfig
 from .scanner.service import scan_once
+from .adapters import get_provider
 from .services.stats import paper_trade_stats, project_paper_revenue
 
 settings = get_settings()
@@ -119,7 +120,8 @@ async def scan(force: bool = False, db: Session = Depends(get_db)):
     global _latest
     sv = _active_version(db)
     cfg = StrategyConfig.from_dict(sv.config_json)
-    _latest = await scan_once(db, cfg, sv.id)
+    rmodel = _get_setting(db, "reversal_model")
+    _latest = await scan_once(db, cfg, sv.id, reversal_model=rmodel)
     return {"scanned": len(_latest), "candidates": _latest,
             "market_open": ms["open"], "market_status": ms}
 
@@ -270,12 +272,82 @@ def backtest(payload: dict, db: Session = Depends(get_db)):
     result["equity_curve"] = equity_curve(result.get("trades", []))
     result["per_stock"] = per_stock_series(events, result.get("trades", []), cfg)
     result["insights"] = backtest_insights(result, meta, cfg)
+    _set_setting(db, "reversal_model", result["reversal_model"])
 
     bt = Backtest(strategy_version_id=sv.id, params_json=payload or {},
                   results_json=result["strategy"], label=(payload or {}).get("label", "real"))
     db.add(bt)
     db.commit()
     return result
+
+
+def _saved_list(db: Session):
+    rows = db.execute(select(SavedIdea).order_by(SavedIdea.id.desc())).scalars().all()
+    return [{
+        "id": r.id, "symbol": r.symbol,
+        "saved_at": r.saved_at.isoformat() if r.saved_at else None,
+        "entry_price": r.entry_price, "score": r.score,
+        "estimated_reversal_pct": r.estimated_reversal_pct,
+        "target_price": r.target_price, "expiry": r.expiry, "status": r.status,
+        "best_return_pct": r.best_return_pct, "last_price": r.last_price,
+    } for r in rows]
+
+
+@app.get("/api/saved")
+def list_saved(db: Session = Depends(get_db)):
+    return {"saved": _saved_list(db)}
+
+
+@app.post("/api/saved")
+def save_idea(payload: dict, db: Session = Depends(get_db)):
+    sym = str((payload or {}).get("symbol", "")).upper().strip()
+    entry = payload.get("entry_price")
+    if not sym or entry is None:
+        return {"ok": False, "error": "symbol and entry_price required."}
+    est = payload.get("estimated_reversal_pct")
+    target = round(entry * (1 + (est or 0) / 100.0), 2) if entry else None
+    idea = SavedIdea(symbol=sym, entry_price=float(entry),
+                     score=payload.get("score"), estimated_reversal_pct=est,
+                     target_price=target, expiry=payload.get("expiry"),
+                     status="watching", best_return_pct=0.0)
+    db.add(idea)
+    db.commit()
+    return {"ok": True, "id": idea.id}
+
+
+@app.delete("/api/saved/{sid}")
+def delete_saved(sid: int, db: Session = Depends(get_db)):
+    r = db.get(SavedIdea, sid)
+    if r:
+        db.delete(r)
+        db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/saved/refresh")
+async def refresh_saved(db: Session = Depends(get_db)):
+    import datetime as _dt
+    ideas = db.execute(select(SavedIdea).where(SavedIdea.status == "watching")).scalars().all()
+    if ideas:
+        provider = get_provider()
+        today = _dt.date.today().isoformat()
+        try:
+            for it in ideas:
+                q = await provider.quote(it.symbol)
+                if not q or not q.get("price"):
+                    continue
+                price = q["price"]
+                ret = (price - it.entry_price) / it.entry_price * 100.0 if it.entry_price else 0.0
+                it.last_price = price
+                it.best_return_pct = max(it.best_return_pct or 0.0, ret)
+                if it.estimated_reversal_pct and it.best_return_pct >= it.estimated_reversal_pct:
+                    it.status = "hit"
+                elif it.expiry and it.expiry < today:
+                    it.status = "expired"
+            db.commit()
+        finally:
+            await provider.aclose()
+    return {"saved": _saved_list(db)}
 
 
 @app.get("/api/stream")

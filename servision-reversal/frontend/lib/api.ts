@@ -32,6 +32,10 @@ export const api = {
   versions: () => get("/api/strategy-versions"),
   activateVersion: (id: number) => post(`/api/strategy-versions/${id}/activate`),
   deleteVersion: (id: number) => del(`/api/strategy-versions/${id}`),
+  savedList: () => get("/api/saved"),
+  saveIdea: (idea: Record<string, unknown>) => post("/api/saved", idea),
+  deleteSaved: (id: number) => del(`/api/saved/${id}`),
+  refreshSaved: () => post("/api/saved/refresh"),
   backtestTickers: () => get("/api/backtest-tickers"),
   setBacktestTickers: (tickers: string, max?: number) => post("/api/backtest-tickers", { tickers, max }),
   base: BASE,
@@ -50,4 +54,9 @@ export type Candidate = {
   higher_low?: boolean;
   vwap_reclaim?: boolean;
   catalyst?: string;
+  estimated_reversal_pct?: number;
+  reversal_tier?: string;
+  reversal_confidence?: string;
+  option_aim?: { direction: string; expiry_next_friday: string; expected_move_pct: number };
+  spark?: number[];
 };

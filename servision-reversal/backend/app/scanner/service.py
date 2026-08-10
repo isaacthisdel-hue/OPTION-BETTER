@@ -24,6 +24,7 @@ from ..services.paper_engine import build_equity_setup
 from . import indicators as ind
 from .config import StrategyConfig
 from .scorer import Candidate, score_candidate
+from ..backtesting.reversal_model import estimate_reversal
 
 
 def _et_minute_of_day(epoch: int, tz: str) -> int:
@@ -66,6 +67,11 @@ async def build_candidate(
     surprise = await provider.earnings_surprise(symbol) if catalyst == "earnings" else None
     funda = await provider.fundamentals(symbol)
 
+    spark = None
+    if bars:
+        step = max(1, len(bars) // 40)
+        spark = [round(b["c"], 2) for b in bars[::step]]
+
     return Candidate(
         symbol=symbol,
         as_of_epoch=now_epoch,
@@ -83,10 +89,12 @@ async def build_candidate(
         price_to_sales=(funda or {}).get("price_to_sales"),
         market_cap=(funda or {}).get("market_cap"),
         price=price,
+        spark=spark,
     )
 
 
-async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int) -> list[dict]:
+async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int,
+                    reversal_model: dict | None = None) -> list[dict]:
     """Run one scan pass over the universe. Returns scored dicts for the API/SSE."""
     settings = get_settings()
     provider = get_provider()
@@ -132,12 +140,18 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int) -> 
                     components_json=[c.__dict__ for c in score.components],
                 ))
 
+            est = estimate_reversal(cand.move_pct, reversal_model)
             d = score.to_dict()
             d.update({"price": cand.price, "move_pct": cand.move_pct,
                       "volume_ratio": cand.volume_ratio,
                       "vwap_distance_pct": cand.vwap_distance_pct,
                       "higher_low": cand.higher_low, "vwap_reclaim": cand.vwap_reclaim,
-                      "catalyst": cand.catalyst})
+                      "catalyst": cand.catalyst,
+                      "estimated_reversal_pct": est["estimated_reversal_pct"],
+                      "reversal_tier": est["tier"],
+                      "reversal_confidence": est["confidence"],
+                      "option_aim": est["option_aim"],
+                      "spark": cand.spark})
             results.append(d)
 
         db.commit()
@@ -149,11 +163,17 @@ async def scan_once(db: Session, cfg: StrategyConfig, strat_version_id: int) -> 
 
 
 async def _resolve_universe(provider, settings) -> tuple[list[str], dict[str, str]]:
-    if settings.watchlist_symbols:
-        return settings.watchlist_symbols[: settings.max_universe_size], {
-            s: "earnings" for s in settings.watchlist_symbols
-        }
-    today = dt.date.today().isoformat()
-    cal = await provider.earnings_calendar(today, today)
-    syms = [e["symbol"] for e in cal if e.get("symbol")][: settings.max_universe_size]
-    return syms, {s: "earnings" for s in syms}
+    """Union of the watchlist and today's earnings names, deduped, capped."""
+    watch = list(settings.watchlist_symbols)
+    catalysts = {s: "earnings" for s in watch}
+    cal_syms: list[str] = []
+    try:
+        today = dt.date.today().isoformat()
+        cal = await provider.earnings_calendar(today, today)
+        cal_syms = [e["symbol"] for e in cal if e.get("symbol")]
+    except Exception:
+        cal_syms = []
+    for sym in cal_syms:
+        catalysts.setdefault(sym, "earnings")
+    universe = list(dict.fromkeys(watch + cal_syms))[: settings.max_universe_size]
+    return universe, catalysts

@@ -54,6 +54,50 @@ class CompositeProvider(MarketDataProvider):
             await self._fmp.aclose()
 
 
+class LiveComposite(MarketDataProvider):
+    """Live scanner default: Twelve Data for quotes/candles (Finnhub free lacks
+    candles), Finnhub for the earnings calendar, FMP/Finnhub for fundamentals."""
+    name = "composite(twelvedata+finnhub)"
+
+    def __init__(self, td, fh, fmp):
+        self._td = td
+        self._fh = fh
+        self._fmp = fmp
+
+    async def intraday_bars(self, *a, **k):
+        return await self._td.intraday_bars(*a, **k)
+
+    async def daily_bars(self, *a, **k):
+        return await self._td.daily_bars(*a, **k)
+
+    async def quote(self, *a, **k):
+        return await self._td.quote(*a, **k)
+
+    async def earnings_calendar(self, *a, **k):
+        return await self._fh.earnings_calendar(*a, **k) if self._fh else []
+
+    async def earnings_surprise(self, symbol):
+        if self._fmp:
+            r = await self._fmp.earnings_surprise(symbol)
+            if r:
+                return r
+        return await self._fh.earnings_surprise(symbol) if self._fh else None
+
+    async def fundamentals(self, symbol):
+        if self._fmp:
+            r = await self._fmp.fundamentals(symbol)
+            if r:
+                return r
+        return await self._fh.fundamentals(symbol) if self._fh else None
+
+    async def aclose(self):
+        await self._td.aclose()
+        if self._fh:
+            await self._fh.aclose()
+        if self._fmp:
+            await self._fmp.aclose()
+
+
 def get_provider() -> MarketDataProvider:
     s = get_settings()
     if s.provider == "fmp":
@@ -62,6 +106,13 @@ def get_provider() -> MarketDataProvider:
         # Placeholder: implement MassiveProvider and import here when you add
         # a paid key. Falls back to Finnhub so the app still runs.
         return FinnhubProvider(s.finnhub_api_key)
-    # default: composite free tier
+    # Prefer Twelve Data for live market data (Finnhub free lacks candles).
+    if s.twelvedata_api_key:
+        from .twelvedata import TwelveDataProvider
+        fh = FinnhubProvider(s.finnhub_api_key) if s.finnhub_api_key else None
+        fmp = FMPProvider(s.fmp_api_key) if s.fmp_api_key else None
+        return LiveComposite(TwelveDataProvider(s.twelvedata_api_key), fh, fmp)
+
+    # fallback free tier: Finnhub + FMP
     fmp = FMPProvider(s.fmp_api_key) if s.fmp_api_key else None
     return CompositeProvider(FinnhubProvider(s.finnhub_api_key), fmp)

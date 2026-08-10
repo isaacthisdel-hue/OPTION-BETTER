@@ -49,6 +49,7 @@ class Candidate:
     # context passthrough for storage / UI
     price: Optional[float] = None
     sector: Optional[str] = None
+    spark: Optional[list] = None
 
 
 @dataclass

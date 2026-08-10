@@ -216,3 +216,39 @@ def backtest_insights(result: dict, meta: dict, cfg) -> list[dict]:
     if not out:
         add("good", "Clean run — no issues flagged.")
     return out
+
+
+_TIER_DEFAULTS = {
+    "Severe drop (<= -15%)": 8.0,
+    "Large drop (-15% to -10%)": 5.0,
+    "Moderate drop (-10% to -6%)": 3.0,
+    "Mild drop (> -6%)": 1.5,
+}
+
+
+def estimate_reversal(move_pct, saved_model=None) -> dict:
+    """Estimate a live candidate's expected reversal % from the learned tiers
+    (falls back to a monotonic default when no backtest model is saved yet)."""
+    tier = _tier(move_pct if move_pct is not None else 0.0)
+    expected = _TIER_DEFAULTS.get(tier, 2.0)
+    positive_rate = None
+    confidence = "heuristic"
+    n = 0
+    if saved_model and saved_model.get("tiers"):
+        for t in saved_model["tiers"]:
+            if t.get("tier") == tier:
+                expected = t.get("median_reversion_pct", expected)
+                positive_rate = t.get("positive_rate_pct")
+                confidence = t.get("confidence", "low")
+                n = t.get("n", 0)
+                break
+    expected = max(0.0, round(float(expected), 2))
+    return {
+        "tier": tier,
+        "estimated_reversal_pct": expected,
+        "positive_rate_pct": positive_rate,
+        "confidence": confidence,
+        "sample_n": n,
+        "option_aim": {"direction": "CALL", "expiry_next_friday": _next_friday(),
+                       "expected_move_pct": expected},
+    }
