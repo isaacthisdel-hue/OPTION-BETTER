@@ -201,3 +201,53 @@ def load_recent_events(settings=None, tickers_csv=None, max_tickers=None):
         "note": "Real 1-min data. Events are the worst recent sell-off sessions per ticker.",
     }
     return events, meta
+
+
+def load_all_sessions(settings=None, tickers_csv=None, max_tickers=None):
+    """Return ALL recent trading sessions (not gap-filtered) as
+    [{symbol, date, bars}] for intraday strategies like the First Candle Rule."""
+    settings = settings or get_settings()
+    providers = _providers(settings)
+    if not providers:
+        raise LoaderError("No data key configured.")
+    src = tickers_csv if tickers_csv is not None else settings.backtest_tickers
+    tickers = list(dict.fromkeys(t.strip().upper() for t in src.split(",") if t.strip()))
+    tickers = tickers[: (max_tickers or settings.backtest_max_tickers)]
+    lookback = settings.backtest_lookback_days
+
+    sessions = []
+    skipped = []
+    rate_limited = 0
+    with httpx.Client(timeout=30.0) as client:
+        for sym in tickers:
+            bars = None
+            rl = False
+            reason = "no data"
+            for pname, pkey, fn in providers:
+                try:
+                    bars = fn(client, pkey, sym)
+                    if bars:
+                        break
+                    bars = None
+                except RateLimited:
+                    rl = True
+                except Exception as e:  # noqa
+                    reason = f"{pname}: {str(e)[:50]}"
+            if not bars:
+                if rl:
+                    rate_limited += 1
+                    skipped.append({"symbol": sym, "reason": "rate-limited"})
+                else:
+                    skipped.append({"symbol": sym, "reason": reason})
+                continue
+            by_day = defaultdict(list)
+            for b in bars:
+                by_day[_session_date(b["t"])].append(b)
+            for day in sorted(by_day)[-lookback:]:
+                sess = by_day[day]
+                if len(sess) >= 30:
+                    sessions.append({"symbol": sym, "date": day.isoformat(), "bars": sess})
+    meta = {"source": "multi", "tickers": tickers, "sessions": len(sessions),
+            "skipped": skipped, "rate_limited": rate_limited, "lookback_days": lookback,
+            "note": "All recent sessions for intraday strategies."}
+    return sessions, meta

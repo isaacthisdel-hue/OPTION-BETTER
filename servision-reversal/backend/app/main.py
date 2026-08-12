@@ -59,6 +59,13 @@ def _startup():
             db.add(StrategyVersion(label=cfg.version_label,
                                    config_json=cfg.to_dict(), notes="default"))
             db.commit()
+        fcr = db.execute(select(StrategyVersion).where(
+            StrategyVersion.label == "First Candle Rule")).first()
+        if not fcr:
+            fc = StrategyConfig(strategy_type="first_candle", version_label="First Candle Rule")
+            db.add(StrategyVersion(label="First Candle Rule", config_json=fc.to_dict(),
+                                   notes="Opening-range + FVG breakout, fixed 2:1 R:R"))
+            db.commit()
     finally:
         db.close()
 
@@ -283,15 +290,42 @@ def _build_backtest_result(db, cfg, sv_id, events, meta, save_model=True):
     return result
 
 
-@app.post("/api/backtest")
-def backtest(payload: dict, db: Session = Depends(get_db)):
-    """Backtest the ACTIVE version on real recent intraday data."""
-    sv = _active_version(db)
-    cfg = StrategyConfig.from_dict(sv.config_json)
+def _run_strategy_backtest(db, cfg, sv_id, save_model=True):
+    """Dispatch to the right engine based on cfg.strategy_type."""
+    if getattr(cfg, "strategy_type", "reversal") == "first_candle":
+        from .backtesting.loader import load_all_sessions, LoaderError
+        from .backtesting.first_candle import run_first_candle
+        if not (settings.twelvedata_api_key or settings.fmp_api_key or settings.alphavantage_api_key):
+            return {"available": False, "error": "No real-data key set.",
+                    "how": "Add a free TWELVEDATA_API_KEY on Railway."}
+        tickers_csv, max_t = _effective_tickers(db)
+        try:
+            sessions, meta = load_all_sessions(settings, tickers_csv=tickers_csv, max_tickers=max_t)
+        except LoaderError as e:
+            return {"available": False, "error": str(e)}
+        if not sessions:
+            rl = meta.get("rate_limited", 0)
+            msg = ("Tickers were rate-limited. Wait a minute and retry." if rl
+                   else "Loaded data but found no complete sessions. Edit the watchlist and retry.")
+            return {"available": False, "error": msg, "meta": meta}
+        result = run_first_candle(sessions, cfg)
+        result["meta"] = meta
+        db.add(Backtest(strategy_version_id=sv_id, params_json={},
+                        results_json=result["strategy"], label="first_candle"))
+        db.commit()
+        return result
     events, meta = _load_backtest_events(db)
     if events is None:
         return meta
-    return _build_backtest_result(db, cfg, sv.id, events, meta, save_model=True)
+    return _build_backtest_result(db, cfg, sv_id, events, meta, save_model=save_model)
+
+
+@app.post("/api/backtest")
+def backtest(payload: dict, db: Session = Depends(get_db)):
+    """Backtest the ACTIVE version (reversal or First Candle Rule) on real data."""
+    sv = _active_version(db)
+    cfg = StrategyConfig.from_dict(sv.config_json)
+    return _run_strategy_backtest(db, cfg, sv.id, save_model=True)
 
 
 @app.post("/api/strategy-versions/{vid}/backtest")
@@ -300,10 +334,7 @@ def backtest_version(vid: int, db: Session = Depends(get_db)):
     if not v:
         return {"available": False, "error": "Version not found."}
     cfg = StrategyConfig.from_dict(v.config_json)
-    events, meta = _load_backtest_events(db)
-    if events is None:
-        return meta
-    return _build_backtest_result(db, cfg, vid, events, meta, save_model=False)
+    return _run_strategy_backtest(db, cfg, vid, save_model=False)
 
 
 @app.post("/api/optimize")
@@ -312,6 +343,9 @@ def optimize_route(payload: dict, db: Session = Depends(get_db)):
     from .backtesting.optimizer import optimize
     sv = _active_version(db)
     base = StrategyConfig.from_dict(sv.config_json)
+    if getattr(base, "strategy_type", "reversal") == "first_candle":
+        return {"available": False,
+                "error": "Auto-optimize tunes the reversal strategy. The First Candle Rule has fixed mechanical rules — just Backtest it."}
     events, meta = _load_backtest_events(db)
     if events is None:
         return meta

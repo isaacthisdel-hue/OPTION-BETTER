@@ -85,6 +85,16 @@ export default function Backtest() {
       </p>
       <Ribbon text="Research only. Reversal tiers are measured from real outcomes, not predictions. Options aims are next-Friday research signals — never orders." />
 
+      {res?.first_candle && (
+        <div className="notice" style={{ marginBottom: 22 }}>
+          <div className="notice-head"><span className="mono" style={{ color: "var(--cyan)" }}>FIRST CANDLE RULE</span></div>
+          <p>
+            09:30–09:45 opening range → first 5-min Fair Value Gap that breaks the range →
+            limit entry at the gap, stop at FVG candle&nbsp;1, fixed 2:1 target. One trade per session.
+          </p>
+        </div>
+      )}
+
       <div className="panel" style={{ marginBottom: 22 }}>
         <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>Watchlist — stocks to backtest</div>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -192,7 +202,7 @@ export default function Backtest() {
         </>
       )}
 
-      {rm && rm.tiers && (
+      {!res?.first_candle && rm && rm.tiers && (
         <>
           <div className="section-title">Learned reversal tiers → next-Friday options aim</div>
           <p className="dim" style={{ fontSize: 12, margin: "-4px 0 12px", maxWidth: "70ch" }}>
@@ -232,6 +242,8 @@ export default function Backtest() {
             <Tile label="Max drawdown" value={fmtPct(s.max_drawdown)} tone="neg" />
             <Tile label="Avg winner" value={fmtPct(s.avg_winner)} tone="pos" />
             <Tile label="Avg loser" value={fmtPct(s.avg_loser)} tone="neg" />
+            {res?.first_candle && <Tile label="Avg R" value={(s as any).avg_R != null ? `${(s as any).avg_R}R` : "—"} tone={sign((s as any).avg_R)} />}
+            {res?.first_candle && <Tile label="Total R" value={(s as any).total_R != null ? `${(s as any).total_R}R` : "—"} tone={sign((s as any).total_R)} />}
           </div>
         </>
       )}

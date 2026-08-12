@@ -54,6 +54,13 @@ class StrategyConfig:
     min_score_to_watch: float = 60.0
     min_score_to_qualify: float = 80.0
 
+    # --- Strategy selection ---
+    strategy_type: str = "reversal"          # "reversal" | "first_candle"
+    fcr_range_minutes: int = 15
+    fcr_signal_minutes: int = 5
+    fcr_risk_reward: float = 2.0
+    fcr_require_close_outside: bool = True
+
     version_label: str = "V1"
     notes: str = ""
 
