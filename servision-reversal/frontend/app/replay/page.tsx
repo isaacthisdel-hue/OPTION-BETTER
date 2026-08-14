@@ -28,6 +28,7 @@ function fmtET(t: number) {
   return new Date(t * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
 }
 const START_CASH = 10000;
+const TICKERS = ["AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","NFLX","AVGO","MU","ARM","QCOM","INTC","TSM","ORCL","CRM","ADBE","PLTR","SMCI","MSTR","COIN","HOOD","SOFI","AFRM","MARA","RIOT","NBIS","SNOW","MDB","CRWD","PANW","SHOP","UBER","ABNB","RIVN","LCID","NIO","BABA","DIS","BAC","F","PYPL","GME","AMC","CVNA","UPST","SPY","QQQ","IWM"];
 
 type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
 type Pos = { id: number; type: "call" | "put"; strike: number; entry: number; contracts: number };
@@ -49,6 +50,7 @@ export default function Replay() {
   const [chartType, setChartType] = useState<"line" | "candle">("candle");
   const [tool, setTool] = useState<"cursor" | "trend" | "hline" | "box">("cursor");
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [selectedShape, setSelectedShape] = useState<number | null>(null);
 
   const [cash, setCash] = useState(START_CASH);
   const [positions, setPositions] = useState<Pos[]>([]);
@@ -143,6 +145,13 @@ export default function Replay() {
         <button className="btn primary" onClick={() => { setBack(0); load(symbol, 0); }}>LOAD</button>
         <button className="btn" onClick={() => { const b = back + 1; setBack(b); load(symbol, b); }}>◀ Older</button>
         <button className="btn" onClick={() => { const b = Math.max(0, back - 1); setBack(b); load(symbol, b); }} disabled={back === 0}>Newer ▶</button>
+        <div className="field" style={{ maxWidth: 130 }}>
+          <label>Quick pick</label>
+          <select value={TICKERS.includes(symbol) ? symbol : ""} onChange={(e) => { const v = e.target.value; if (v) { setSymbol(v); setBack(0); load(v, 0); } }}>
+            <option value="">— pick —</option>
+            {TICKERS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
         <div className="field" style={{ maxWidth: 80 }}>
           <label>IV</label>
           <input type="number" step="0.05" value={iv} onChange={(e) => setIv(Math.max(0.05, +e.target.value))} />
@@ -178,11 +187,13 @@ export default function Replay() {
                     </button>
                   ))}
                 </div>
-                <button className="btn" onClick={() => setShapes((s) => s.slice(0, -1))}>Undo</button>
-                <button className="btn" onClick={() => setShapes([])}>Clear</button>
+                <button className="btn" onClick={() => { setShapes((s) => s.slice(0, -1)); setSelectedShape(null); }}>Undo</button>
+                <button className="btn" onClick={() => { setShapes([]); setSelectedShape(null); }}>Clear</button>
+                <button className="btn danger" disabled={selectedShape == null}
+                  onClick={() => { if (selectedShape != null) { setShapes((s) => s.filter((_, i) => i !== selectedShape)); setSelectedShape(null); } }}>Delete sel</button>
               </div>
 
-              <ReplayChart bars={bars} idx={idx} chartType={chartType} tool={tool} shapes={shapes} setShapes={setShapes} playing={playing} />
+              <ReplayChart bars={bars} idx={idx} chartType={chartType} tool={tool} shapes={shapes} setShapes={setShapes} playing={playing} selected={selectedShape} setSelected={setSelectedShape} />
 
               <div className="replay-controls">
                 <button className="btn primary" onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚ Pause" : "▶ Play"}</button>
@@ -284,8 +295,8 @@ export default function Replay() {
 }
 
 // ================= Chart =================
-function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing }:
-  { bars: Bar[]; idx: number; chartType: "line" | "candle"; tool: string; shapes: Shape[]; setShapes: (fn: (s: Shape[]) => Shape[]) => void; playing: boolean }) {
+function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing, selected, setSelected }:
+  { bars: Bar[]; idx: number; chartType: "line" | "candle"; tool: string; shapes: Shape[]; setShapes: (fn: (s: Shape[]) => Shape[]) => void; playing: boolean; selected: number | null; setSelected: (n: number | null) => void }) {
   const W = 760, H = 360, mL = 6, mR = 54, mT = 8, mB = 22;
   const PW = W - mL - mR, PH = H - mT - mB;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -294,7 +305,7 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing }:
   const [viewStart, setViewStart] = useState(0);
   const [follow, setFollow] = useState(true);
   const [cross, setCross] = useState<{ x: number; y: number } | null>(null);
-  const drag = useRef<{ x: number; startView: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; startView: number; moved: boolean } | null>(null);
   const draw = useRef<{ i1: number; p1: number } | null>(null);
   const [preview, setPreview] = useState<Shape | null>(null);
 
@@ -325,30 +336,54 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing }:
   const pFromY = (py: number) => lo + (1 - (py - mT) / PH) * (hi - lo);
   const bw = Math.max(1, (PW / slots) * 0.62);
 
+  function distToSeg(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+    const dx = x2 - x1, dy = y2 - y1; const len2 = dx * dx + dy * dy || 1;
+    let t = ((px - x1) * dx + (py - y1) * dy) / len2; t = Math.max(0, Math.min(1, t));
+    const cx = x1 + t * dx, cy = y1 + t * dy; return Math.hypot(px - cx, py - cy);
+  }
+  function hitTest(x: number, y: number): number | null {
+    for (let i = shapes.length - 1; i >= 0; i--) {
+      const sh = shapes[i];
+      if (sh.tool === "hline") { if (Math.abs(y - yP(sh.p1)) < 6) return i; }
+      else if (sh.tool === "box") {
+        const x1 = xAbs(sh.i1), x2 = xAbs(sh.i2), y1 = yP(sh.p1), y2 = yP(sh.p2);
+        if (x >= Math.min(x1, x2) - 4 && x <= Math.max(x1, x2) + 4 && y >= Math.min(y1, y2) - 4 && y <= Math.max(y1, y2) + 4) return i;
+      } else { if (distToSeg(x, y, xAbs(sh.i1), yP(sh.p1), xAbs(sh.i2), yP(sh.p2)) < 6) return i; }
+    }
+    return null;
+  }
+
   function toLocal(e: React.MouseEvent) {
     const r = svgRef.current!.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
   }
   function onDown(e: React.MouseEvent) {
     const { x, y } = toLocal(e);
-    if (tool === "cursor") { drag.current = { x, startView: start }; setFollow(false); }
+    if (tool === "cursor") { drag.current = { x, y, startView: start, moved: false }; }
     else { draw.current = { i1: iFromX(x), p1: pFromY(y) }; }
   }
   function onMove(e: React.MouseEvent) {
     const { x, y } = toLocal(e);
     setCross({ x, y });
     if (drag.current) {
-      const dIdx = ((x - drag.current.x) / PW) * vc;
-      setViewStart(Math.max(0, Math.min(drag.current.startView - Math.round(dIdx), Math.max(0, idx + 1 - vc))));
+      if (Math.abs(x - drag.current.x) > 3 || Math.abs(y - drag.current.y) > 3) {
+        drag.current.moved = true; setFollow(false);
+        const dIdx = ((x - drag.current.x) / PW) * slots;
+        setViewStart(clampN(drag.current.startView - Math.round(dIdx), 0, Math.max(0, idx + 1 - vc)));
+      }
     } else if (draw.current) {
       setPreview({ tool: tool as any, i1: draw.current.i1, p1: draw.current.p1, i2: iFromX(x), p2: pFromY(y) });
     }
   }
   function onUp(e: React.MouseEvent) {
-    if (draw.current) {
+    const hasE = !!(e && "clientX" in e);
+    if (draw.current && hasE) {
       const { x, y } = toLocal(e);
-      const sh: Shape = { tool: tool as any, i1: draw.current.i1, p1: draw.current.p1, i2: iFromX(x), p2: pFromY(y) };
-      setShapes((s) => [...s, sh]); setPreview(null);
+      setShapes((s) => [...s, { tool: tool as any, i1: draw.current!.i1, p1: draw.current!.p1, i2: iFromX(x), p2: pFromY(y) }]);
+      setSelected(null); setPreview(null);
+    } else if (drag.current && !drag.current.moved && hasE) {
+      const { x, y } = toLocal(e);
+      setSelected(hitTest(x, y));
     }
     drag.current = null; draw.current = null;
   }
@@ -403,6 +438,13 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing }:
           if (sh.tool === "box") return <rect key={i} x={Math.min(xAbs(sh.i1), xAbs(sh.i2))} y={Math.min(yP(sh.p1), yP(sh.p2))} width={Math.abs(xAbs(sh.i2) - xAbs(sh.i1))} height={Math.abs(yP(sh.p2) - yP(sh.p1))} fill="rgba(111,99,166,0.12)" stroke="var(--violet)" strokeWidth="1" />;
           return <line key={i} x1={xAbs(sh.i1)} y1={yP(sh.p1)} x2={xAbs(sh.i2)} y2={yP(sh.p2)} stroke="var(--violet)" strokeWidth="1.4" />;
         })}
+
+        {selected != null && shapes[selected] && (() => {
+          const sh = shapes[selected];
+          if (sh.tool === "hline") return <line x1={mL} y1={yP(sh.p1)} x2={mL + PW} y2={yP(sh.p1)} stroke="var(--cyan)" strokeWidth="2.4" />;
+          if (sh.tool === "box") return <rect x={Math.min(xAbs(sh.i1), xAbs(sh.i2))} y={Math.min(yP(sh.p1), yP(sh.p2))} width={Math.abs(xAbs(sh.i2) - xAbs(sh.i1))} height={Math.abs(yP(sh.p2) - yP(sh.p1))} fill="none" stroke="var(--cyan)" strokeWidth="2.4" />;
+          return <g><line x1={xAbs(sh.i1)} y1={yP(sh.p1)} x2={xAbs(sh.i2)} y2={yP(sh.p2)} stroke="var(--cyan)" strokeWidth="2.6" /><circle cx={xAbs(sh.i1)} cy={yP(sh.p1)} r="4" fill="var(--cyan)" /><circle cx={xAbs(sh.i2)} cy={yP(sh.p2)} r="4" fill="var(--cyan)" /></g>;
+        })()}
 
         <line x1={mL} y1={yP(last.c)} x2={mL + PW} y2={yP(last.c)} stroke="var(--ink-faint)" strokeWidth="0.6" strokeDasharray="2 2" />
         {cross && (

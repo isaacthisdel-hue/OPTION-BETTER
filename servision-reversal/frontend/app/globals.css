@@ -472,3 +472,7 @@ table.data tr:hover td { background: var(--panel-2); }
 /* replay zoom cluster */
 .zoomcluster { position: absolute; left: 8px; top: 8px; display: flex; gap: 4px; }
 .zbtn { font-size: 12px; padding: 3px 8px; line-height: 1; }
+
+/* replay select styling */
+.field select { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; color: var(--ink); font-family: var(--mono); font-size: 13px; padding: 8px 10px; }
+.field select:focus { outline: none; border-color: var(--cyan); }
