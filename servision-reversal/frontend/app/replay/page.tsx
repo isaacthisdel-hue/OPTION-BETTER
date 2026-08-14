@@ -182,7 +182,7 @@ export default function Replay() {
                 <button className="btn" onClick={() => setShapes([])}>Clear</button>
               </div>
 
-              <ReplayChart bars={bars} idx={idx} chartType={chartType} tool={tool} shapes={shapes} setShapes={setShapes} />
+              <ReplayChart bars={bars} idx={idx} chartType={chartType} tool={tool} shapes={shapes} setShapes={setShapes} playing={playing} />
 
               <div className="replay-controls">
                 <button className="btn primary" onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚ Pause" : "▶ Play"}</button>
@@ -284,8 +284,8 @@ export default function Replay() {
 }
 
 // ================= Chart =================
-function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes }:
-  { bars: Bar[]; idx: number; chartType: "line" | "candle"; tool: string; shapes: Shape[]; setShapes: (fn: (s: Shape[]) => Shape[]) => void }) {
+function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes, playing }:
+  { bars: Bar[]; idx: number; chartType: "line" | "candle"; tool: string; shapes: Shape[]; setShapes: (fn: (s: Shape[]) => Shape[]) => void; playing: boolean }) {
   const W = 760, H = 360, mL = 6, mR = 54, mT = 8, mB = 22;
   const PW = W - mL - mR, PH = H - mT - mB;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -299,7 +299,18 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes }:
   const [preview, setPreview] = useState<Shape | null>(null);
 
   const vc = Math.max(20, Math.min(viewCount, Math.max(20, idx + 1)));
+  const rightPad = Math.max(3, Math.round(vc * 0.12));   // empty space on the right ("extend")
+  const slots = vc + rightPad;
   useEffect(() => { if (follow) setViewStart(Math.max(0, idx + 1 - vc)); }, [idx, vc, follow]);
+  useEffect(() => { if (playing) setFollow(true); }, [playing]);   // Play snaps back to live
+  const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+  function zoom(f: number) {
+    const center = viewStart + vc / 2;
+    const nc = clampN(Math.round(vc * f), 20, Math.max(20, idx + 1));
+    setViewCount(nc); setFollow(false);
+    setViewStart(clampN(Math.round(center - nc / 2), 0, Math.max(0, idx + 1 - nc)));
+  }
+  function fit() { setViewCount(Math.max(20, idx + 1)); setFollow(true); }
   const start = Math.max(0, Math.min(viewStart, Math.max(0, idx + 1 - vc)));
   const vis = bars.slice(start, Math.min(idx + 1, start + vc));
   if (vis.length < 2) return <div className="faint" style={{ height: H }}>…</div>;
@@ -308,11 +319,11 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes }:
   for (const b of vis) { hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); }
   const padp = (hi - lo) * 0.08 || 1; hi += padp; lo -= padp;
 
-  const xAbs = (i: number) => mL + ((i - start) + 0.5) / vc * PW;
+  const xAbs = (i: number) => mL + ((i - start) + 0.5) / slots * PW;
   const yP = (p: number) => mT + (1 - (p - lo) / (hi - lo)) * PH;
-  const iFromX = (px: number) => start + ((px - mL) / PW) * vc - 0.5;
+  const iFromX = (px: number) => start + ((px - mL) / PW) * slots - 0.5;
   const pFromY = (py: number) => lo + (1 - (py - mT) / PH) * (hi - lo);
-  const bw = Math.max(1, (PW / vc) * 0.62);
+  const bw = Math.max(1, (PW / slots) * 0.62);
 
   function toLocal(e: React.MouseEvent) {
     const r = svgRef.current!.getBoundingClientRect();
@@ -403,7 +414,12 @@ function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes }:
           </g>
         )}
       </svg>
-      {!follow && <button className="btn followbtn" onClick={() => setFollow(true)}>⟳ Follow</button>}
+      <div className="zoomcluster">
+        <button className="btn zbtn" onClick={() => zoom(0.8)} title="Zoom in">＋</button>
+        <button className="btn zbtn" onClick={() => zoom(1.25)} title="Zoom out">－</button>
+        <button className="btn zbtn" onClick={fit} title="Fit all">Fit</button>
+      </div>
+      {!follow && <button className="btn followbtn" onClick={() => { setFollow(true); }}>⟳ Follow</button>}
     </div>
   );
 }
