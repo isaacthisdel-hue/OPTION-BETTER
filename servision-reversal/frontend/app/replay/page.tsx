@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
-// ---------- Black-Scholes (model-priced chain) ----------
+// ---------- Black-Scholes ----------
 function normCdf(x: number) {
   const t = 1 / (1 + 0.2316419 * Math.abs(x));
   const d = 0.3989423 * Math.exp(-x * x / 2);
@@ -23,11 +23,15 @@ function callDelta(S: number, K: number, T: number, sig: number, r = 0.04) {
   const d1 = (Math.log(S / K) + (r + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
   return normCdf(d1);
 }
-function strikeStep(S: number) { return S < 25 ? 1 : S < 100 ? 2.5 : S < 300 ? 5 : 10; }
+function strikeStep(S: number) { return S < 25 ? 1 : S < 100 ? 2.5 : S < 1000 ? 5 : 10; }
+function fmtET(t: number) {
+  return new Date(t * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
+}
 const START_CASH = 10000;
 
 type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
-type Pos = { id: number; type: "call" | "put"; strike: number; entry: number; contracts: number; entryIdx: number };
+type Pos = { id: number; type: "call" | "put"; strike: number; entry: number; contracts: number };
+type Shape = { tool: "trend" | "hline" | "box"; i1: number; p1: number; i2: number; p2: number };
 
 export default function Replay() {
   const [symbol, setSymbol] = useState("AAPL");
@@ -40,11 +44,17 @@ export default function Replay() {
   const [playing, setPlaying] = useState(false);
   const [speedMs, setSpeedMs] = useState(400);
   const [iv, setIv] = useState(0.5);
-  const [contracts, setContracts] = useState(1);
+  const [qty, setQty] = useState(1);
+
+  const [chartType, setChartType] = useState<"line" | "candle">("candle");
+  const [tool, setTool] = useState<"cursor" | "trend" | "hline" | "box">("cursor");
+  const [shapes, setShapes] = useState<Shape[]>([]);
 
   const [cash, setCash] = useState(START_CASH);
   const [positions, setPositions] = useState<Pos[]>([]);
   const [pid, setPid] = useState(1);
+  const [ticket, setTicket] = useState<{ type: "call" | "put"; strike: number; premium: number } | null>(null);
+  const [ticketQty, setTicketQty] = useState(1);
 
   async function load(sym = symbol, b = back) {
     setLoading(true); setErr(null); setPlaying(false);
@@ -53,7 +63,7 @@ export default function Replay() {
       if (!d.available) { setErr(d.error || "No data"); setData(null); }
       else {
         setData(d); setIdx(Math.min(20, (d.bars?.length || 1) - 1));
-        setCash(START_CASH); setPositions([]);
+        setCash(START_CASH); setPositions([]); setShapes([]);
       }
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   }
@@ -78,24 +88,37 @@ export default function Replay() {
   const step = strikeStep(S || 1);
   const atm = Math.round((S || 1) / step) * step;
   const strikes: number[] = [];
-  for (let k = 6; k >= -6; k--) strikes.push(atm + k * step);
+  for (let k = 10; k >= -10; k--) strikes.push(atm + k * step);
 
   const openValue = positions.reduce((s, p) => s + bs(p.type, S, p.strike, T, iv) * 100 * p.contracts, 0);
   const equity = cash + openValue;
   const pnl = equity - START_CASH;
-  const clock = cur ? new Date(cur.t * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" }) : "—";
 
-  function buy(type: "call" | "put", strike: number, premium: number) {
+  function openTicket(type: "call" | "put", strike: number, premium: number) {
     if (premium <= 0.01) return;
-    const cost = premium * 100 * contracts;
+    setTicket({ type, strike, premium }); setTicketQty(qty);
+  }
+  function confirmBuy() {
+    if (!ticket) return;
+    const add = Math.max(1, Math.floor(ticketQty));
+    const cost = ticket.premium * 100 * add;
     setCash((c) => c - cost);
-    setPositions((ps) => [...ps, { id: pid, type, strike, entry: premium, contracts, entryIdx: idx }]);
-    setPid((x) => x + 1);
+    setPositions((ps) => {
+      const ex = ps.find((p) => p.type === ticket.type && p.strike === ticket.strike);
+      if (ex) {
+        const total = ex.contracts + add;
+        const avg = (ex.entry * ex.contracts + ticket.premium * add) / total;
+        return ps.map((p) => (p === ex ? { ...p, contracts: total, entry: avg } : p));
+      }
+      const np = { id: pid, type: ticket.type, strike: ticket.strike, entry: ticket.premium, contracts: add };
+      setPid((x) => x + 1);
+      return [...ps, np];
+    });
+    setQty(add); setTicket(null);
   }
   function close(id: number) {
     const p = positions.find((x) => x.id === id); if (!p) return;
-    const val = bs(p.type, S, p.strike, T, iv) * 100 * p.contracts;
-    setCash((c) => c + val);
+    setCash((c) => c + bs(p.type, S, p.strike, T, iv) * 100 * p.contracts);
     setPositions((ps) => ps.filter((x) => x.id !== id));
   }
 
@@ -108,26 +131,25 @@ export default function Replay() {
         </div>
       </div>
       <p className="pagesub">
-        Replay a real intraday session bar-by-bar and trade a live option chain. The chain is
-        model-priced (Black-Scholes) off the current price with same-day (0DTE) expiry, so it
-        reacts to both price moves and time decay as you step through the day.
+        Replay a real intraday session and trade a live model-priced (Black-Scholes, 0DTE) option chain.
+        Drag to pan, scroll to zoom, draw levels, and watch positions react to price + time decay.
       </p>
 
       <div className="panel" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div className="field" style={{ maxWidth: 120 }}>
+        <div className="field" style={{ maxWidth: 110 }}>
           <label>Symbol</label>
           <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
         </div>
-        <button className="btn primary" onClick={() => load(symbol, 0)}>LOAD</button>
-        <button className="btn" onClick={() => { const b = back + 1; setBack(b); load(symbol, b); }}>◀ Older day</button>
-        <button className="btn" onClick={() => { const b = Math.max(0, back - 1); setBack(b); load(symbol, b); }} disabled={back === 0}>Newer day ▶</button>
-        <div className="field" style={{ maxWidth: 90 }}>
+        <button className="btn primary" onClick={() => { setBack(0); load(symbol, 0); }}>LOAD</button>
+        <button className="btn" onClick={() => { const b = back + 1; setBack(b); load(symbol, b); }}>◀ Older</button>
+        <button className="btn" onClick={() => { const b = Math.max(0, back - 1); setBack(b); load(symbol, b); }} disabled={back === 0}>Newer ▶</button>
+        <div className="field" style={{ maxWidth: 80 }}>
           <label>IV</label>
           <input type="number" step="0.05" value={iv} onChange={(e) => setIv(Math.max(0.05, +e.target.value))} />
         </div>
-        <div className="field" style={{ maxWidth: 90 }}>
-          <label>Contracts</label>
-          <input type="number" value={contracts} onChange={(e) => setContracts(Math.max(1, Math.floor(+e.target.value)))} />
+        <div className="field" style={{ maxWidth: 80 }}>
+          <label>Qty</label>
+          <input type="number" value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(+e.target.value)))} />
         </div>
       </div>
 
@@ -139,18 +161,36 @@ export default function Replay() {
             <div className="panel">
               <div className="replay-readout">
                 <span className="mono" style={{ fontSize: 16 }}>{data.symbol}</span>
-                <span className="dim">{data.date} · {clock} ET</span>
+                <span className="dim">{data.date} · {fmtET(cur.t)} ET</span>
                 <span className="mono">${S.toFixed(2)}</span>
                 <span className="faint">bar {idx + 1}/{n} · {Math.round(minsToClose)}m to close</span>
               </div>
-              <PriceChart bars={bars} idx={idx} />
+
+              <div className="charttools">
+                <div className="seg">
+                  <button className={`segbtn ${chartType === "candle" ? "on" : ""}`} onClick={() => setChartType("candle")}>Candles</button>
+                  <button className={`segbtn ${chartType === "line" ? "on" : ""}`} onClick={() => setChartType("line")}>Line</button>
+                </div>
+                <div className="seg">
+                  {(["cursor", "trend", "hline", "box"] as const).map((tl) => (
+                    <button key={tl} className={`segbtn ${tool === tl ? "on" : ""}`} onClick={() => setTool(tl)} title={tl}>
+                      {tl === "cursor" ? "✛" : tl === "trend" ? "╱" : tl === "hline" ? "—" : "▭"}
+                    </button>
+                  ))}
+                </div>
+                <button className="btn" onClick={() => setShapes((s) => s.slice(0, -1))}>Undo</button>
+                <button className="btn" onClick={() => setShapes([])}>Clear</button>
+              </div>
+
+              <ReplayChart bars={bars} idx={idx} chartType={chartType} tool={tool} shapes={shapes} setShapes={setShapes} />
+
               <div className="replay-controls">
                 <button className="btn primary" onClick={() => setPlaying((p) => !p)}>{playing ? "❚❚ Pause" : "▶ Play"}</button>
                 <button className="btn" onClick={() => setIdx((i) => Math.min(n - 1, i + 1))}>Step ▶</button>
                 <button className="btn" onClick={() => { setPlaying(false); setIdx(Math.min(20, n - 1)); }}>Reset</button>
-                <label className="faint" style={{ fontSize: 12 }}>Speed
-                  <input type="range" min={60} max={900} step={20} value={950 - speedMs}
-                    onChange={(e) => setSpeedMs(950 - +e.target.value)} style={{ marginLeft: 8, verticalAlign: "middle" }} />
+                <label className="faint" style={{ fontSize: 12 }}>Speed {(1000 / speedMs).toFixed(1)} bars/s
+                  <input type="range" min={60} max={1000} step={20} value={1060 - speedMs}
+                    onChange={(e) => setSpeedMs(1060 - +e.target.value)} style={{ marginLeft: 8, verticalAlign: "middle" }} />
                 </label>
               </div>
             </div>
@@ -164,23 +204,25 @@ export default function Replay() {
 
             <div className="section-title">Positions · {positions.length}</div>
             {positions.length === 0 ? (
-              <div className="empty">No open positions. Click a call or put price in the chain to buy.</div>
+              <div className="empty">No open positions. Click a call or put price in the chain to open a ticket.</div>
             ) : (
               <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
                 <table className="data">
-                  <thead><tr><th>Type</th><th>Strike</th><th>Entry</th><th>Now</th><th>P/L</th><th>Qty</th><th></th></tr></thead>
+                  <thead><tr><th>Type</th><th>Strike</th><th>Avg</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th></th></tr></thead>
                   <tbody>
                     {positions.map((p) => {
                       const now = bs(p.type, S, p.strike, T, iv);
+                      const cost = p.entry * 100 * p.contracts;
                       const ppl = (now - p.entry) * 100 * p.contracts;
                       return (
                         <tr key={p.id}>
                           <td className={p.type === "call" ? "pos" : "neg"}>{p.type.toUpperCase()}</td>
                           <td>{p.strike}</td>
                           <td>${p.entry.toFixed(2)}</td>
+                          <td>{p.contracts}</td>
+                          <td>${cost.toFixed(0)}</td>
                           <td>${now.toFixed(2)}</td>
                           <td className={ppl >= 0 ? "pos" : "neg"}>{ppl >= 0 ? "+" : ""}${ppl.toFixed(0)}</td>
-                          <td>{p.contracts}</td>
                           <td><button className="btn danger" onClick={() => close(p.id)}>Close</button></td>
                         </tr>
                       );
@@ -203,16 +245,37 @@ export default function Replay() {
                   const isAtm = Math.abs(k - atm) < 1e-6;
                   return (
                     <tr key={k} className={isAtm ? "atm" : ""}>
-                      <td className="buyable call" onClick={() => buy("call", k, cp)}>{cp.toFixed(2)}</td>
+                      <td className="buyable call" onClick={() => openTicket("call", k, cp)}>{cp.toFixed(2)}</td>
                       <td className="faint">{dl.toFixed(2)}</td>
                       <td className="strike">{k}</td>
-                      <td className="buyable put" onClick={() => buy("put", k, pp)}>{pp.toFixed(2)}</td>
+                      <td className="buyable put" onClick={() => openTicket("put", k, pp)}>{pp.toFixed(2)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <div className="faint" style={{ fontSize: 10, marginTop: 8 }}>Click a call/put price to buy {contracts} contract(s).</div>
+            <div className="faint" style={{ fontSize: 10, marginTop: 8 }}>Click a call/put price to open a buy ticket.</div>
+          </div>
+        </div>
+      )}
+
+      {ticket && (
+        <div className="ticket-overlay" onClick={() => setTicket(null)}>
+          <div className="ticket" onClick={(e) => e.stopPropagation()}>
+            <div className="ticket-head">
+              <span className={`mono ${ticket.type === "call" ? "pos" : "neg"}`}>BUY {ticket.type.toUpperCase()}</span>
+              <span className="mono">{data.symbol} {ticket.strike}</span>
+            </div>
+            <div className="ticket-row"><span className="dim">Premium</span><span className="mono">${ticket.premium.toFixed(2)}</span></div>
+            <div className="field" style={{ margin: "10px 0" }}>
+              <label>Contracts</label>
+              <input type="number" value={ticketQty} onChange={(e) => setTicketQty(Math.max(1, Math.floor(+e.target.value)))} />
+            </div>
+            <div className="ticket-row"><span className="dim">Total cost</span><span className="mono">${(ticket.premium * 100 * Math.max(1, Math.floor(ticketQty))).toFixed(2)}</span></div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button className="btn primary" style={{ flex: 1 }} onClick={confirmBuy}>CONFIRM BUY</button>
+              <button className="btn" onClick={() => setTicket(null)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
@@ -220,23 +283,127 @@ export default function Replay() {
   );
 }
 
-function PriceChart({ bars, idx }: { bars: Bar[]; idx: number }) {
-  const w = 720, h = 300, pad = 8;
-  const shown = bars.slice(0, idx + 1);
-  if (shown.length < 2) return <div className="faint" style={{ height: h }}>…</div>;
-  const cs = shown.map((b) => b.c);
-  const min = Math.min(...cs), max = Math.max(...cs), rng = max - min || 1;
-  const x = (i: number) => pad + (i / (bars.length - 1)) * (w - 2 * pad);
-  const y = (v: number) => h - pad - ((v - min) / rng) * (h - 2 * pad);
-  const d = shown.map((b, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(b.c).toFixed(1)}`).join(" ");
-  const last = shown[shown.length - 1];
-  const up = last.c >= shown[0].c;
+// ================= Chart =================
+function ReplayChart({ bars, idx, chartType, tool, shapes, setShapes }:
+  { bars: Bar[]; idx: number; chartType: "line" | "candle"; tool: string; shapes: Shape[]; setShapes: (fn: (s: Shape[]) => Shape[]) => void }) {
+  const W = 760, H = 360, mL = 6, mR = 54, mT = 8, mB = 22;
+  const PW = W - mL - mR, PH = H - mT - mB;
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const [viewCount, setViewCount] = useState(90);
+  const [viewStart, setViewStart] = useState(0);
+  const [follow, setFollow] = useState(true);
+  const [cross, setCross] = useState<{ x: number; y: number } | null>(null);
+  const drag = useRef<{ x: number; startView: number } | null>(null);
+  const draw = useRef<{ i1: number; p1: number } | null>(null);
+  const [preview, setPreview] = useState<Shape | null>(null);
+
+  const vc = Math.max(20, Math.min(viewCount, Math.max(20, idx + 1)));
+  useEffect(() => { if (follow) setViewStart(Math.max(0, idx + 1 - vc)); }, [idx, vc, follow]);
+  const start = Math.max(0, Math.min(viewStart, Math.max(0, idx + 1 - vc)));
+  const vis = bars.slice(start, Math.min(idx + 1, start + vc));
+  if (vis.length < 2) return <div className="faint" style={{ height: H }}>…</div>;
+
+  let hi = -Infinity, lo = Infinity;
+  for (const b of vis) { hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); }
+  const padp = (hi - lo) * 0.08 || 1; hi += padp; lo -= padp;
+
+  const xAbs = (i: number) => mL + ((i - start) + 0.5) / vc * PW;
+  const yP = (p: number) => mT + (1 - (p - lo) / (hi - lo)) * PH;
+  const iFromX = (px: number) => start + ((px - mL) / PW) * vc - 0.5;
+  const pFromY = (py: number) => lo + (1 - (py - mT) / PH) * (hi - lo);
+  const bw = Math.max(1, (PW / vc) * 0.62);
+
+  function toLocal(e: React.MouseEvent) {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+  }
+  function onDown(e: React.MouseEvent) {
+    const { x, y } = toLocal(e);
+    if (tool === "cursor") { drag.current = { x, startView: start }; setFollow(false); }
+    else { draw.current = { i1: iFromX(x), p1: pFromY(y) }; }
+  }
+  function onMove(e: React.MouseEvent) {
+    const { x, y } = toLocal(e);
+    setCross({ x, y });
+    if (drag.current) {
+      const dIdx = ((x - drag.current.x) / PW) * vc;
+      setViewStart(Math.max(0, Math.min(drag.current.startView - Math.round(dIdx), Math.max(0, idx + 1 - vc))));
+    } else if (draw.current) {
+      setPreview({ tool: tool as any, i1: draw.current.i1, p1: draw.current.p1, i2: iFromX(x), p2: pFromY(y) });
+    }
+  }
+  function onUp(e: React.MouseEvent) {
+    if (draw.current) {
+      const { x, y } = toLocal(e);
+      const sh: Shape = { tool: tool as any, i1: draw.current.i1, p1: draw.current.p1, i2: iFromX(x), p2: pFromY(y) };
+      setShapes((s) => [...s, sh]); setPreview(null);
+    }
+    drag.current = null; draw.current = null;
+  }
+  function onWheel(e: React.WheelEvent) {
+    const { x } = toLocal(e);
+    const iAt = iFromX(x);
+    const factor = e.deltaY > 0 ? 1.15 : 0.87;
+    const nc = Math.max(20, Math.min(Math.round(vc * factor), bars.length));
+    setViewCount(nc); setFollow(false);
+    setViewStart(Math.max(0, Math.round(iAt - ((iAt - start) * nc) / vc)));
+  }
+
+  const priceTicks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) * i) / 4);
+  const timeTicks: number[] = [];
+  for (let k = 0; k < 6; k++) timeTicks.push(Math.round(start + (vc * k) / 5));
+  const drawn = preview ? [...shapes, preview] : shapes;
+  const last = vis[vis.length - 1];
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: "block" }}>
-      <line x1={pad} y1={y(last.c)} x2={w - pad} y2={y(last.c)} stroke="var(--line)" strokeDasharray="3 3" />
-      <path d={d} fill="none" stroke={up ? "var(--cyan)" : "var(--coral)"} strokeWidth="1.6" />
-      <circle cx={x(shown.length - 1)} cy={y(last.c)} r="3.5" fill={up ? "var(--cyan)" : "var(--coral)"} />
-      <text x={x(shown.length - 1) - 4} y={y(last.c) - 8} fontSize="11" fill="var(--ink)" textAnchor="end" fontFamily="var(--mono)">${last.c.toFixed(2)}</text>
-    </svg>
+    <div style={{ position: "relative" }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", cursor: tool === "cursor" ? "grab" : "crosshair", userSelect: "none" }}
+        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={() => { onUp({} as any); setCross(null); }} onWheel={onWheel}>
+        {priceTicks.map((p, i) => (
+          <g key={i}>
+            <line x1={mL} y1={yP(p)} x2={mL + PW} y2={yP(p)} stroke="var(--line)" strokeWidth="0.5" />
+            <text x={mL + PW + 4} y={yP(p) + 3} fontSize="9" fill="var(--ink-faint)" fontFamily="var(--mono)">{p.toFixed(2)}</text>
+          </g>
+        ))}
+        {timeTicks.map((i, k) => (bars[i] ? (
+          <text key={k} x={xAbs(i)} y={H - 6} fontSize="9" fill="var(--ink-faint)" textAnchor="middle" fontFamily="var(--mono)">{fmtET(bars[i].t)}</text>
+        ) : null))}
+
+        {chartType === "line" ? (
+          <path d={vis.map((b, i) => `${i === 0 ? "M" : "L"} ${xAbs(start + i).toFixed(1)} ${yP(b.c).toFixed(1)}`).join(" ")}
+            fill="none" stroke={last.c >= vis[0].c ? "var(--cyan)" : "var(--coral)"} strokeWidth="1.4" />
+        ) : (
+          vis.map((b, i) => {
+            const x = xAbs(start + i); const up = b.c >= b.o;
+            const col = up ? "var(--cyan)" : "var(--coral)";
+            const yo = yP(b.o), yc = yP(b.c);
+            return (
+              <g key={i}>
+                <line x1={x} y1={yP(b.h)} x2={x} y2={yP(b.l)} stroke={col} strokeWidth="1" />
+                <rect x={x - bw / 2} y={Math.min(yo, yc)} width={bw} height={Math.max(1, Math.abs(yc - yo))} fill={col} />
+              </g>
+            );
+          })
+        )}
+
+        {drawn.map((sh, i) => {
+          if (sh.tool === "hline") return <g key={i}><line x1={mL} y1={yP(sh.p1)} x2={mL + PW} y2={yP(sh.p1)} stroke="var(--amber)" strokeWidth="1" strokeDasharray="4 3" /><text x={mL + PW + 4} y={yP(sh.p1) + 3} fontSize="9" fill="var(--amber)" fontFamily="var(--mono)">{sh.p1.toFixed(2)}</text></g>;
+          if (sh.tool === "box") return <rect key={i} x={Math.min(xAbs(sh.i1), xAbs(sh.i2))} y={Math.min(yP(sh.p1), yP(sh.p2))} width={Math.abs(xAbs(sh.i2) - xAbs(sh.i1))} height={Math.abs(yP(sh.p2) - yP(sh.p1))} fill="rgba(111,99,166,0.12)" stroke="var(--violet)" strokeWidth="1" />;
+          return <line key={i} x1={xAbs(sh.i1)} y1={yP(sh.p1)} x2={xAbs(sh.i2)} y2={yP(sh.p2)} stroke="var(--violet)" strokeWidth="1.4" />;
+        })}
+
+        <line x1={mL} y1={yP(last.c)} x2={mL + PW} y2={yP(last.c)} stroke="var(--ink-faint)" strokeWidth="0.6" strokeDasharray="2 2" />
+        {cross && (
+          <g>
+            <line x1={cross.x} y1={mT} x2={cross.x} y2={mT + PH} stroke="var(--ink-faint)" strokeWidth="0.5" />
+            <line x1={mL} y1={cross.y} x2={mL + PW} y2={cross.y} stroke="var(--ink-faint)" strokeWidth="0.5" />
+            <rect x={mL + PW} y={cross.y - 7} width={mR} height={14} fill="var(--panel-2)" />
+            <text x={mL + PW + 4} y={cross.y + 3} fontSize="9" fill="var(--ink)" fontFamily="var(--mono)">{pFromY(cross.y).toFixed(2)}</text>
+          </g>
+        )}
+      </svg>
+      {!follow && <button className="btn followbtn" onClick={() => setFollow(true)}>⟳ Follow</button>}
+    </div>
   );
 }

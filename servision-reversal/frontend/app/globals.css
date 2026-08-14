@@ -453,3 +453,18 @@ table.data tr:hover td { background: var(--panel-2); }
 .buyable.put { color: var(--coral); }
 .buyable:hover { background: rgba(95,125,79,0.10); }
 .buyable.put:hover { background: rgba(176,85,60,0.10); }
+
+/* ---------- replay chart tools ---------- */
+.charttools { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.segbtn { font-family: var(--mono); font-size: 12px; background: var(--panel); color: var(--ink-dim); border: none; border-right: 1px solid var(--line); padding: 5px 10px; cursor: pointer; }
+.segbtn:last-child { border-right: none; }
+.segbtn:hover { color: var(--ink); background: var(--panel-2); }
+.segbtn.on { background: var(--cyan); color: #fff; }
+.followbtn { position: absolute; right: 60px; bottom: 8px; font-size: 11px; padding: 4px 9px; }
+
+/* ---------- buy ticket ---------- */
+.ticket-overlay { position: fixed; inset: 0; background: rgba(20,24,20,0.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; width: 300px; box-shadow: 0 12px 40px rgba(26,30,25,0.25); }
+.ticket-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 15px; }
+.ticket-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: var(--ink-dim); }
