@@ -53,21 +53,62 @@ export default function Replay() {
   const [selectedShape, setSelectedShape] = useState<number | null>(null);
 
   const [cash, setCash] = useState(START_CASH);
+  const [usedDays, setUsedDays] = useState<string[]>([]);
+  const [saved, setSaved] = useState<{ symbol: string; date: string; pnl: number; pnlPct: number }[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const [sessionStartCash, setSessionStartCash] = useState(START_CASH);
+  const [tradedThisSession, setTradedThisSession] = useState(false);
   const [positions, setPositions] = useState<Pos[]>([]);
   const [pid, setPid] = useState(1);
+
+  useEffect(() => {
+    try {
+      const r = JSON.parse(localStorage.getItem("replay_v1") || "{}");
+      if (typeof r.cash === "number") setCash(r.cash);
+      if (Array.isArray(r.usedDays)) setUsedDays(r.usedDays);
+      if (Array.isArray(r.saved)) setSaved(r.saved);
+    } catch { /* ignore */ }
+    setHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (hydrated) localStorage.setItem("replay_v1", JSON.stringify({ cash, usedDays, saved }));
+  }, [cash, usedDays, saved, hydrated]);
   const [ticket, setTicket] = useState<{ type: "call" | "put"; strike: number; premium: number } | null>(null);
   const [ticketQty, setTicketQty] = useState(1);
 
   async function load(sym = symbol, b = back) {
     setLoading(true); setErr(null); setPlaying(false);
+    // settle the session we're leaving into cash; lock it if it was traded
+    let carried = cash;
+    const blocked = [...usedDays];
+    if (data) {
+      positions.forEach((p) => { carried += bs(p.type, S, p.strike, T, iv) * 100 * p.contracts; });
+      const leavingKey = `${data.symbol}|${data.date}`;
+      if (tradedThisSession && !usedDays.includes(leavingKey)) {
+        const sp = carried - sessionStartCash;
+        setUsedDays((u) => (u.includes(leavingKey) ? u : [...u, leavingKey]));
+        setSaved((sv) => [{ symbol: data.symbol, date: data.date, pnl: sp, pnlPct: sessionStartCash ? (sp / sessionStartCash) * 100 : 0 }, ...sv]);
+        blocked.push(leavingKey);
+      }
+      setCash(carried); setPositions([]);
+    }
     try {
       const d = await api.replaySession(sym.toUpperCase(), b);
-      if (!d.available) { setErr(d.error || "No data"); setData(null); }
-      else {
-        setData(d); setIdx(Math.min(20, (d.bars?.length || 1) - 1));
-        setCash(START_CASH); setPositions([]); setShapes([]);
+      if (!d.available) { setErr(d.error || "No data"); setData(null); setLoading(false); return; }
+      const key = `${d.symbol}|${d.date}`;
+      if (blocked.includes(key)) {
+        setErr(`You already traded ${d.symbol} on ${d.date}. Each stock-day can be traded once — pick another day/stock, or Reset account.`);
+        setData(null); setLoading(false); return;
       }
+      setData(d); setIdx(Math.min(20, (d.bars?.length || 1) - 1));
+      setShapes([]); setSelectedShape(null);
+      setSessionStartCash(carried); setTradedThisSession(false);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
+  }
+  function resetAccount() {
+    if (typeof window !== "undefined" && !window.confirm("Reset account? Clears balance, positions, saved sessions, and all locked days.")) return;
+    setCash(START_CASH); setPositions([]); setUsedDays([]); setSaved([]);
+    setSessionStartCash(START_CASH); setTradedThisSession(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
@@ -95,6 +136,10 @@ export default function Replay() {
   const openValue = positions.reduce((s, p) => s + bs(p.type, S, p.strike, T, iv) * 100 * p.contracts, 0);
   const equity = cash + openValue;
   const pnl = equity - START_CASH;
+  const totalPct = (pnl / START_CASH) * 100;
+  const sessionPnl = equity - sessionStartCash;
+  const sessionPct = sessionStartCash ? (sessionPnl / sessionStartCash) * 100 : 0;
+  const savedTotal = saved.reduce((a, r) => a + r.pnl, 0);
 
   function openTicket(type: "call" | "put", strike: number, premium: number) {
     if (premium <= 0.01) return;
@@ -116,7 +161,7 @@ export default function Replay() {
       setPid((x) => x + 1);
       return [...ps, np];
     });
-    setQty(add); setTicket(null);
+    setQty(add); setTicket(null); setTradedThisSession(true);
   }
   function close(id: number) {
     const p = positions.find((x) => x.id === id); if (!p) return;
@@ -160,6 +205,7 @@ export default function Replay() {
           <label>Qty</label>
           <input type="number" value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(+e.target.value)))} />
         </div>
+        <button className="btn danger" onClick={resetAccount}>Reset account</button>
       </div>
 
       {err && <div className="empty">{err}</div>}
@@ -208,9 +254,9 @@ export default function Replay() {
 
             <div className="grid cols-4" style={{ marginTop: 14 }}>
               <div className="tile"><div className="label">Cash</div><div className="value">${cash.toFixed(0)}</div></div>
-              <div className="tile"><div className="label">Open value</div><div className="value">${openValue.toFixed(0)}</div></div>
-              <div className="tile"><div className="label">Equity</div><div className="value">${equity.toFixed(0)}</div></div>
-              <div className="tile"><div className="label">Total P/L</div><div className={`value ${pnl >= 0 ? "pos" : "neg"}`}>{pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}</div></div>
+              <div className="tile"><div className="label">Equity</div><div className="value">${equity.toFixed(0)}</div><div className="foot">open ${openValue.toFixed(0)}</div></div>
+              <div className="tile"><div className="label">Session P/L</div><div className={`value ${sessionPnl >= 0 ? "pos" : "neg"}`}>{sessionPnl >= 0 ? "+" : ""}${sessionPnl.toFixed(0)}</div><div className={`foot ${sessionPct >= 0 ? "pos" : "neg"}`}>{sessionPct >= 0 ? "+" : ""}{sessionPct.toFixed(1)}%</div></div>
+              <div className="tile"><div className="label">Total P/L</div><div className={`value ${pnl >= 0 ? "pos" : "neg"}`}>{pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}</div><div className={`foot ${totalPct >= 0 ? "pos" : "neg"}`}>{totalPct >= 0 ? "+" : ""}{totalPct.toFixed(1)}%</div></div>
             </div>
 
             <div className="section-title">Positions · {positions.length}</div>
@@ -219,7 +265,7 @@ export default function Replay() {
             ) : (
               <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
                 <table className="data">
-                  <thead><tr><th>Type</th><th>Strike</th><th>Avg</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th></th></tr></thead>
+                  <thead><tr><th>Type</th><th>Strike</th><th>Avg</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th>P/L %</th><th></th></tr></thead>
                   <tbody>
                     {positions.map((p) => {
                       const now = bs(p.type, S, p.strike, T, iv);
@@ -234,10 +280,36 @@ export default function Replay() {
                           <td>${cost.toFixed(0)}</td>
                           <td>${now.toFixed(2)}</td>
                           <td className={ppl >= 0 ? "pos" : "neg"}>{ppl >= 0 ? "+" : ""}${ppl.toFixed(0)}</td>
+                          <td className={ppl >= 0 ? "pos" : "neg"}>{p.entry > 0 ? `${(now - p.entry) / p.entry * 100 >= 0 ? "+" : ""}${((now - p.entry) / p.entry * 100).toFixed(0)}%` : "—"}</td>
                           <td><button className="btn danger" onClick={() => close(p.id)}>Close</button></td>
                         </tr>
                       );
                     })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="section-title">Saved sessions · {saved.length}</div>
+            {saved.length === 0 ? (
+              <div className="empty">Finished days appear here with their P/L. Each stock-day can be traded once.</div>
+            ) : (
+              <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+                <table className="data">
+                  <thead><tr><th>Symbol</th><th>Date</th><th>P/L</th><th>P/L %</th></tr></thead>
+                  <tbody>
+                    {saved.map((r, i) => (
+                      <tr key={i}>
+                        <td style={{ fontWeight: 600 }}>{r.symbol}</td>
+                        <td className="dim">{r.date}</td>
+                        <td className={r.pnl >= 0 ? "pos" : "neg"}>{r.pnl >= 0 ? "+" : ""}${r.pnl.toFixed(0)}</td>
+                        <td className={r.pnlPct >= 0 ? "pos" : "neg"}>{r.pnlPct >= 0 ? "+" : ""}{r.pnlPct.toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>Total</td><td></td>
+                      <td className={savedTotal >= 0 ? "pos" : "neg"}>{savedTotal >= 0 ? "+" : ""}${savedTotal.toFixed(0)}</td><td></td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
