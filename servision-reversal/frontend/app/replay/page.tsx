@@ -24,6 +24,24 @@ function callDelta(S: number, K: number, T: number, sig: number, r = 0.04) {
   return normCdf(d1);
 }
 function strikeStep(S: number) { return S < 25 ? 1 : S < 100 ? 2.5 : S < 1000 ? 5 : 10; }
+const COMMISSION = 0.66; // per contract, each side
+// variance floor so 0DTE premium doesn't collapse to $0 too early (~15 min of vega)
+function effT(T: number) { return Math.max(T, 15 / (60 * 24 * 365)); }
+// volatility smile: OTM wings priced up, mild put skew (equity-style)
+function ivSmile(base: number, S: number, K: number) {
+  const m = Math.log(K / (S || 1));
+  return Math.max(0.12, Math.min(3, base * (1 + 3.2 * m * m - 0.5 * m)));
+}
+function midPrice(type: "call" | "put", S: number, K: number, T: number, base: number) {
+  return bs(type, S, K, effT(T), ivSmile(base, S, K));
+}
+function halfSpread(mid: number) { return Math.max(0.02, Math.min(0.6, 0.045 * mid + 0.02)); }
+function askPrice(type: "call" | "put", S: number, K: number, T: number, base: number) {
+  const m = midPrice(type, S, K, T, base); return m + halfSpread(m);
+}
+function bidPrice(type: "call" | "put", S: number, K: number, T: number, base: number) {
+  const m = midPrice(type, S, K, T, base); return Math.max(0, m - halfSpread(m));
+}
 function fmtET(t: number) {
   return new Date(t * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
 }
@@ -31,7 +49,7 @@ const START_CASH = 10000;
 const TICKERS = ["AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","NFLX","AVGO","MU","ARM","QCOM","INTC","TSM","ORCL","CRM","ADBE","PLTR","SMCI","MSTR","COIN","HOOD","SOFI","AFRM","MARA","RIOT","NBIS","SNOW","MDB","CRWD","PANW","SHOP","UBER","ABNB","RIVN","LCID","NIO","BABA","DIS","BAC","F","PYPL","GME","AMC","CVNA","UPST","SPY","QQQ","IWM"];
 
 type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
-type Pos = { id: number; type: "call" | "put"; strike: number; entry: number; contracts: number };
+type Pos = { id: number; type: "call" | "put"; strike: number; contracts: number; costBasis: number };
 type Shape = { tool: "trend" | "hline" | "box"; i1: number; p1: number; i2: number; p2: number };
 
 export default function Replay() {
@@ -82,7 +100,7 @@ export default function Replay() {
     let carried = cash;
     const blocked = [...usedDays];
     if (data) {
-      positions.forEach((p) => { carried += bs(p.type, S, p.strike, T, iv) * 100 * p.contracts; });
+      positions.forEach((p) => { carried += liq(p); });
       const leavingKey = `${data.symbol}|${data.date}`;
       if (tradedThisSession && !usedDays.includes(leavingKey)) {
         const sp = carried - sessionStartCash;
@@ -133,7 +151,8 @@ export default function Replay() {
   const strikes: number[] = [];
   for (let k = 10; k >= -10; k--) strikes.push(atm + k * step);
 
-  const openValue = positions.reduce((s, p) => s + bs(p.type, S, p.strike, T, iv) * 100 * p.contracts, 0);
+  const liq = (p: Pos) => Math.max(0, bidPrice(p.type, S, p.strike, T, iv) * 100 * p.contracts - COMMISSION * p.contracts);
+  const openValue = positions.reduce((s, p) => s + liq(p), 0);
   const equity = cash + openValue;
   const pnl = equity - START_CASH;
   const totalPct = (pnl / START_CASH) * 100;
@@ -148,16 +167,13 @@ export default function Replay() {
   function confirmBuy() {
     if (!ticket) return;
     const add = Math.max(1, Math.floor(ticketQty));
-    const cost = ticket.premium * 100 * add;
-    setCash((c) => c - cost);
+    const ask = askPrice(ticket.type, S, ticket.strike, T, iv);
+    const costAdd = ask * 100 * add + COMMISSION * add;
+    setCash((c) => c - costAdd);
     setPositions((ps) => {
       const ex = ps.find((p) => p.type === ticket.type && p.strike === ticket.strike);
-      if (ex) {
-        const total = ex.contracts + add;
-        const avg = (ex.entry * ex.contracts + ticket.premium * add) / total;
-        return ps.map((p) => (p === ex ? { ...p, contracts: total, entry: avg } : p));
-      }
-      const np = { id: pid, type: ticket.type, strike: ticket.strike, entry: ticket.premium, contracts: add };
+      if (ex) return ps.map((p) => (p === ex ? { ...p, contracts: p.contracts + add, costBasis: p.costBasis + costAdd } : p));
+      const np = { id: pid, type: ticket.type, strike: ticket.strike, contracts: add, costBasis: costAdd };
       setPid((x) => x + 1);
       return [...ps, np];
     });
@@ -165,7 +181,7 @@ export default function Replay() {
   }
   function close(id: number) {
     const p = positions.find((x) => x.id === id); if (!p) return;
-    setCash((c) => c + bs(p.type, S, p.strike, T, iv) * 100 * p.contracts);
+    setCash((c) => c + liq(p));
     setPositions((ps) => ps.filter((x) => x.id !== id));
   }
 
@@ -268,19 +284,20 @@ export default function Replay() {
                   <thead><tr><th>Type</th><th>Strike</th><th>Avg</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th>P/L %</th><th></th></tr></thead>
                   <tbody>
                     {positions.map((p) => {
-                      const now = bs(p.type, S, p.strike, T, iv);
-                      const cost = p.entry * 100 * p.contracts;
-                      const ppl = (now - p.entry) * 100 * p.contracts;
+                      const nowBid = bidPrice(p.type, S, p.strike, T, iv);
+                      const cost = p.costBasis;
+                      const ppl = liq(p) - cost;
+                      const avg = p.costBasis / (p.contracts * 100);
                       return (
                         <tr key={p.id}>
                           <td className={p.type === "call" ? "pos" : "neg"}>{p.type.toUpperCase()}</td>
                           <td>{p.strike}</td>
-                          <td>${p.entry.toFixed(2)}</td>
+                          <td>${avg.toFixed(2)}</td>
                           <td>{p.contracts}</td>
                           <td>${cost.toFixed(0)}</td>
-                          <td>${now.toFixed(2)}</td>
+                          <td>${nowBid.toFixed(2)}</td>
                           <td className={ppl >= 0 ? "pos" : "neg"}>{ppl >= 0 ? "+" : ""}${ppl.toFixed(0)}</td>
-                          <td className={ppl >= 0 ? "pos" : "neg"}>{p.entry > 0 ? `${(now - p.entry) / p.entry * 100 >= 0 ? "+" : ""}${((now - p.entry) / p.entry * 100).toFixed(0)}%` : "—"}</td>
+                          <td className={ppl >= 0 ? "pos" : "neg"}>{cost > 0 ? `${ppl / cost * 100 >= 0 ? "+" : ""}${(ppl / cost * 100).toFixed(0)}%` : "—"}</td>
                           <td><button className="btn danger" onClick={() => close(p.id)}>Close</button></td>
                         </tr>
                       );
@@ -317,14 +334,14 @@ export default function Replay() {
           </div>
 
           <div className="panel chain">
-            <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>Option chain · 0DTE · IV {(iv * 100).toFixed(0)}%</div>
+            <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>Option chain · 0DTE · ask (incl. spread) · base IV {(iv * 100).toFixed(0)}%</div>
             <table className="chaintable">
               <thead><tr><th>Call</th><th>Δ</th><th>Strike</th><th>Put</th></tr></thead>
               <tbody>
                 {strikes.map((k) => {
-                  const cp = bs("call", S, k, T, iv);
-                  const pp = bs("put", S, k, T, iv);
-                  const dl = callDelta(S, k, T, iv);
+                  const cp = askPrice("call", S, k, T, iv);
+                  const pp = askPrice("put", S, k, T, iv);
+                  const dl = callDelta(S, k, effT(T), ivSmile(iv, S, k));
                   const isAtm = Math.abs(k - atm) < 1e-6;
                   return (
                     <tr key={k} className={isAtm ? "atm" : ""}>
@@ -349,12 +366,13 @@ export default function Replay() {
               <span className={`mono ${ticket.type === "call" ? "pos" : "neg"}`}>BUY {ticket.type.toUpperCase()}</span>
               <span className="mono">{data.symbol} {ticket.strike}</span>
             </div>
-            <div className="ticket-row"><span className="dim">Premium</span><span className="mono">${ticket.premium.toFixed(2)}</span></div>
+            <div className="ticket-row"><span className="dim">Ask (per contract)</span><span className="mono">${ticket.premium.toFixed(2)}</span></div>
+            <div className="ticket-row"><span className="dim">Commission</span><span className="mono">${(COMMISSION * Math.max(1, Math.floor(ticketQty))).toFixed(2)}</span></div>
             <div className="field" style={{ margin: "10px 0" }}>
               <label>Contracts</label>
               <input type="number" value={ticketQty} onChange={(e) => setTicketQty(Math.max(1, Math.floor(+e.target.value)))} />
             </div>
-            <div className="ticket-row"><span className="dim">Total cost</span><span className="mono">${(ticket.premium * 100 * Math.max(1, Math.floor(ticketQty))).toFixed(2)}</span></div>
+            <div className="ticket-row"><span className="dim">Total cost</span><span className="mono">${(ticket.premium * 100 * Math.max(1, Math.floor(ticketQty)) + COMMISSION * Math.max(1, Math.floor(ticketQty))).toFixed(2)}</span></div>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
               <button className="btn primary" style={{ flex: 1 }} onClick={confirmBuy}>CONFIRM BUY</button>
               <button className="btn" onClick={() => setTicket(null)}>Cancel</button>
