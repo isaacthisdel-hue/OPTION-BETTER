@@ -251,3 +251,28 @@ def load_all_sessions(settings=None, tickers_csv=None, max_tickers=None):
             "skipped": skipped, "rate_limited": rate_limited, "lookback_days": lookback,
             "note": "All recent sessions for intraday strategies."}
     return sessions, meta
+
+
+def load_symbol_sessions(symbol, settings=None):
+    """Recent intraday sessions for ONE symbol: [{date, bars}] ascending."""
+    settings = settings or get_settings()
+    providers = _providers(settings)
+    if not providers:
+        raise LoaderError("No data key configured.")
+    bars = None
+    with httpx.Client(timeout=30.0) as client:
+        for pname, pkey, fn in providers:
+            try:
+                bars = fn(client, pkey, symbol)
+                if bars:
+                    break
+                bars = None
+            except Exception:  # noqa
+                bars = None
+    if not bars:
+        return []
+    by_day = defaultdict(list)
+    for b in bars:
+        by_day[_session_date(b["t"])].append(b)
+    return [{"date": d.isoformat(), "bars": by_day[d]}
+            for d in sorted(by_day) if len(by_day[d]) >= 30]

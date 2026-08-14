@@ -433,3 +433,23 @@ table.data tr:hover td { background: var(--panel-2); }
 .predbadge { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; padding: 3px 7px; border-radius: 4px; }
 .predbadge.rev { background: rgba(95,125,79,0.14); color: var(--cyan); border: 1px solid rgba(95,125,79,0.4); }
 .predbadge.cont { background: rgba(176,85,60,0.12); color: var(--coral); border: 1px solid rgba(176,85,60,0.35); }
+
+/* ---------- options replay ---------- */
+.replay-grid { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .replay-grid { grid-template-columns: 1fr; } }
+.replay-readout { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.replay-readout .mono { font-variant-numeric: tabular-nums; }
+.replay-controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+
+.chain { position: sticky; top: 16px; }
+.chaintable { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+.chaintable th { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: center; }
+.chaintable td { padding: 5px 6px; text-align: center; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.chaintable .strike { font-weight: 600; color: var(--ink); }
+.chaintable tr.atm { background: var(--panel-2); }
+.chaintable tr.atm .strike { color: var(--cyan); }
+.buyable { cursor: pointer; }
+.buyable.call { color: var(--cyan); }
+.buyable.put { color: var(--coral); }
+.buyable:hover { background: rgba(95,125,79,0.10); }
+.buyable.put:hover { background: rgba(176,85,60,0.10); }

@@ -10,6 +10,7 @@ const ITEMS = [
   ["05", "Statistics", "/stats"],
   ["06", "Settings", "/settings"],
   ["07", "Saved", "/saved"],
+  ["08", "Replay", "/replay"],
 ];
 
 export function Nav() {

@@ -35,6 +35,8 @@ export const api = {
   createVersion: (label: string, config: Record<string, unknown>, notes = "") =>
     post("/api/strategy-versions", { label, config, notes }),
   optimize: () => post("/api/optimize", {}),
+  replaySession: (symbol: string, back = 0) =>
+    get(`/api/replay/session?symbol=${encodeURIComponent(symbol)}&back=${back}`),
   deleteVersion: (id: number) => del(`/api/strategy-versions/${id}`),
   savedList: () => get("/api/saved"),
   saveIdea: (idea: Record<string, unknown>) => post("/api/saved", idea),

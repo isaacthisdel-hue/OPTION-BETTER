@@ -425,6 +425,25 @@ async def refresh_saved(db: Session = Depends(get_db)):
     return {"saved": _saved_list(db)}
 
 
+@app.get("/api/replay/session")
+def replay_session(symbol: str, back: int = 0, db: Session = Depends(get_db)):
+    """Return one recent intraday session's 1-min bars for the replay simulator.
+    back=0 is the most recent session, back=1 the one before, etc."""
+    from .backtesting.loader import load_symbol_sessions, LoaderError
+    try:
+        sessions = load_symbol_sessions((symbol or "").upper().strip())
+    except LoaderError as e:
+        return {"available": False, "error": str(e)}
+    if not sessions:
+        return {"available": False,
+                "error": "No intraday data for that symbol (or rate-limited). Try another ticker."}
+    idx = max(0, min(len(sessions) - 1, len(sessions) - 1 - back))
+    sess = sessions[idx]
+    return {"available": True, "symbol": (symbol or "").upper().strip(),
+            "date": sess["date"], "bars": sess["bars"],
+            "sessions_available": len(sessions), "back": len(sessions) - 1 - idx}
+
+
 @app.get("/api/stream")
 async def stream():
     async def gen():
